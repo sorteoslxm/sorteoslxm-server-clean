@@ -1,15 +1,14 @@
-// config/firebase.js
-import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import dotenv from "dotenv";
+import admin from "firebase-admin";
 
-dotenv.config();
-
-// ✅ Usa la variable del entorno (Render → Environment → FIREBASE_SERVICE_ACCOUNT_KEY)
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
 
-initializeApp({
-  credential: cert(serviceAccount),
+// ✅ Convierte los \n en saltos de línea reales
+serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
-export const db = getFirestore();
+export const db = admin.firestore();
+export const bucket = admin.storage().bucket();
