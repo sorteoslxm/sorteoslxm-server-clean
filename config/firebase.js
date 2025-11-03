@@ -1,19 +1,30 @@
+// config/firebase.js
 import admin from "firebase-admin";
-import dotenv from "dotenv";
-dotenv.config();
+
+// 🔥 Verificamos que la variable exista
+const serviceAccountString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+
+if (!serviceAccountString) {
+  console.error("❌ No se encontró FIREBASE_SERVICE_ACCOUNT_KEY en el entorno");
+  process.exit(1);
+}
 
 let serviceAccount;
 
 try {
-  serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-  console.log("🔥 Firebase conectado correctamente");
+  // Si Render guarda el JSON como string plano, lo parseamos
+  serviceAccount = JSON.parse(serviceAccountString);
 } catch (error) {
-  console.error("❌ No se pudo parsear FIREBASE_SERVICE_ACCOUNT_KEY", error);
+  console.error("❌ Error parseando FIREBASE_SERVICE_ACCOUNT_KEY:", error);
+  process.exit(1);
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
+// Inicializa Firebase
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
+  console.log("🔥 Firebase conectado correctamente");
+}
 
 export const db = admin.firestore();
-export const auth = admin.auth();
