@@ -1,30 +1,17 @@
-// config/firebase.js
+// 📁 web/sorteoslxm-server-clean/config/firebase.js
 import admin from "firebase-admin";
+import dotenv from "dotenv";
 
-// 🔥 Verificamos que la variable exista
-const serviceAccountString = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+dotenv.config();
 
-if (!serviceAccountString) {
-  console.error("❌ No se encontró FIREBASE_SERVICE_ACCOUNT_KEY en el entorno");
-  process.exit(1);
-}
+// 🔐 Leer clave del env
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
 
-let serviceAccount;
-
-try {
-  // Si Render guarda el JSON como string plano, lo parseamos
-  serviceAccount = JSON.parse(serviceAccountString);
-} catch (error) {
-  console.error("❌ Error parseando FIREBASE_SERVICE_ACCOUNT_KEY:", error);
-  process.exit(1);
-}
-
-// Inicializa Firebase
+// ✅ Inicializar Firebase solo una vez
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
-  console.log("🔥 Firebase conectado correctamente");
 }
 
-export const db = admin.firestore();
+export default admin;
