@@ -1,15 +1,17 @@
-// 📁 web/sorteoslxm-server-clean/routes/sorteos.js
+// web/sorteoslxm-server-clean/routes/sorteos.js
 import express from "express";
 import admin from "../config/firebase.js";
 
 const router = express.Router();
+const db = admin.firestore();
 
-router.get("/sorteos", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const db = admin.firestore();
+    console.log("🟢 Obteniendo sorteos desde Firestore...");
     const snapshot = await db.collection("sorteos").get();
 
     if (snapshot.empty) {
+      console.log("⚠️ No se encontraron sorteos en Firestore.");
       return res.json([]);
     }
 
@@ -18,10 +20,11 @@ router.get("/sorteos", async (req, res) => {
       ...doc.data(),
     }));
 
+    console.log(`✅ Se obtuvieron ${sorteos.length} sorteos.`);
     res.json(sorteos);
   } catch (error) {
-    console.error("Error al obtener sorteos:", error);
-    res.status(500).json({ error: "Error al obtener sorteos" });
+    console.error("❌ Error detallado al obtener sorteos:", error);
+    res.status(500).json({ error: "Error al obtener sorteos", details: error.message });
   }
 });
 
