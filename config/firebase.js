@@ -1,4 +1,3 @@
-// 📁 web/sorteoslxm-server-clean/config/firebase.js
 import admin from "firebase-admin";
 
 const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
@@ -8,10 +7,16 @@ if (!serviceAccount) {
   throw new Error("FIREBASE_SERVICE_ACCOUNT_KEY no está configurada");
 }
 
-const parsedAccount =
-  typeof serviceAccount === "string"
-    ? JSON.parse(serviceAccount)
-    : serviceAccount;
+let parsedAccount;
+try {
+  parsedAccount =
+    typeof serviceAccount === "string"
+      ? JSON.parse(serviceAccount)
+      : serviceAccount;
+} catch (e) {
+  console.error("❌ Error al parsear FIREBASE_SERVICE_ACCOUNT_KEY:", e);
+  throw e;
+}
 
 if (!admin.apps.length) {
   admin.initializeApp({
