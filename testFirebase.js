@@ -1,13 +1,14 @@
-import { db } from "./firebase.js";
+import admin from "./config/firebase.js";
 
-(async () => {
+async function test() {
   try {
+    const db = admin.firestore();
     const snapshot = await db.collection("sorteos").get();
-    console.log("✅ Conectado correctamente a Firestore. Documentos encontrados:", snapshot.size);
-    snapshot.forEach(doc => {
-      console.log("📄", doc.id, "=>", doc.data());
-    });
+    console.log("✅ Total sorteos:", snapshot.size);
+    snapshot.forEach(doc => console.log(doc.id, doc.data()));
   } catch (err) {
-    console.error("❌ Error conectando a Firestore:", err);
+    console.error("❌ Error Firebase:", err);
   }
-})();
+}
+
+test();

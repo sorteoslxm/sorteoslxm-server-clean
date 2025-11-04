@@ -1,17 +1,23 @@
 // 📁 web/sorteoslxm-server-clean/config/firebase.js
 import admin from "firebase-admin";
-import dotenv from "dotenv";
 
-dotenv.config();
+const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
-// 🔐 Leer clave del env
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+if (!serviceAccount) {
+  console.error("❌ No se encontró FIREBASE_SERVICE_ACCOUNT_KEY en el entorno");
+  throw new Error("FIREBASE_SERVICE_ACCOUNT_KEY no está configurada");
+}
 
-// ✅ Inicializar Firebase solo una vez
+const parsedAccount =
+  typeof serviceAccount === "string"
+    ? JSON.parse(serviceAccount)
+    : serviceAccount;
+
 if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert(parsedAccount),
   });
+  console.log("✅ Firebase Admin inicializado correctamente");
 }
 
 export default admin;
