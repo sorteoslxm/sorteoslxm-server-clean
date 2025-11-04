@@ -2,27 +2,20 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import compraRoutes from "./routes/compra.js";
-import webhookRoutes from "./routes/webhook-pago.js";
-import admin from "./config/firebase.js";
+import sorteosRoutes from "./routes/sorteos.js"; // 👈 importante
 
 dotenv.config();
 
 const app = express();
-
-// Middlewares
 app.use(cors());
 app.use(express.json());
 
-// ✅ Prefijo de todas las rutas API
-app.use("/api/compra", compraRoutes);
-app.use("/api/webhook-pago", webhookRoutes);
+// ✅ Prefijo general de las rutas
+app.use("/api", sorteosRoutes);
 
-// ✅ Ruta test principal para ver si la API responde
 app.get("/api", (req, res) => {
   res.json({ message: "API de Sorteos LXM funcionando ✅" });
 });
 
-// Puerto
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`✅ Servidor corriendo en puerto ${PORT}`));
