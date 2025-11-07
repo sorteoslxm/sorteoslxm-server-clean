@@ -1,30 +1,35 @@
-// config/firebase.js
 import admin from "firebase-admin";
-import dotenv from "dotenv";
-
-dotenv.config();
+import fs from "fs";
 
 let serviceAccount;
 
-try {
-  // ✅ Cargar las credenciales desde variable de entorno (Render)
-  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (serviceAccountEnv) {
-    serviceAccount = JSON.parse(serviceAccountEnv);
-    console.log("✅ Clave de Firebase cargada desde variable de entorno");
-  } else {
-    // ✅ Fallback local (solo en tu Mac)
-    serviceAccount = (await import("./serviceAccountKey.json", { assert: { type: "json" } })).default;
-    console.log("✅ Clave de Firebase cargada desde archivo local");
-  }
+const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
 
+if (serviceAccountEnv) {
+  try {
+    serviceAccount = JSON.parse(serviceAccountEnv);
+    console.log("✅ FIREBASE_SERVICE_ACCOUNT cargada desde variable de entorno");
+  } catch (error) {
+    console.error("❌ Error parseando FIREBASE_SERVICE_ACCOUNT:", error);
+  }
+} else {
+  console.warn("⚠️ No se encontró FIREBASE_SERVICE_ACCOUNT en entorno, intentando leer archivo local...");
+  try {
+    serviceAccount = JSON.parse(
+      fs.readFileSync("./config/serviceAccountKey.json", "utf8")
+    );
+  } catch (error) {
+    console.error("❌ No se encontró archivo serviceAccountKey.json:", error);
+  }
+}
+
+if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
-
-  console.log("🔥 Firebase Admin inicializado correctamente");
-} catch (error) {
-  console.error("❌ Error inicializando Firebase Admin:", error);
 }
 
-export default admin;
+const db = admin.firestore();
+const auth = admin.auth();
+
+export { db, auth }; // 👈 ESTA LÍNEA es lo que faltaba
