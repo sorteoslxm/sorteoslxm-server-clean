@@ -1,27 +1,30 @@
+// config/firebase.js
 import admin from "firebase-admin";
 import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
-import { readFileSync } from "fs";
 
 dotenv.config();
 
-// 🔧 Setup de ruta absoluta para el archivo de credenciales
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const serviceAccountPath = path.join(__dirname, "serviceAccountKey.json");
+let serviceAccount;
 
-const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, "utf-8"));
+try {
+  // ✅ Cargar las credenciales desde variable de entorno (Render)
+  const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (serviceAccountEnv) {
+    serviceAccount = JSON.parse(serviceAccountEnv);
+    console.log("✅ Clave de Firebase cargada desde variable de entorno");
+  } else {
+    // ✅ Fallback local (solo en tu Mac)
+    serviceAccount = (await import("./serviceAccountKey.json", { assert: { type: "json" } })).default;
+    console.log("✅ Clave de Firebase cargada desde archivo local");
+  }
 
-// ✅ Inicializar Firebase Admin solo una vez
-if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
+
   console.log("🔥 Firebase Admin inicializado correctamente");
+} catch (error) {
+  console.error("❌ Error inicializando Firebase Admin:", error);
 }
 
-// ✅ Exportar el Firestore listo
-const db = admin.firestore();
-export { db };
 export default admin;
