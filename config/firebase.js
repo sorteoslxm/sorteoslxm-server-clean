@@ -32,4 +32,6 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const auth = admin.auth();
 
-export { db, auth }; // 👈 ESTA LÍNEA es lo que faltaba
+// ✅ Exportamos todo: por nombre y como default
+export { admin, db, auth };
+export default admin;
