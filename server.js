@@ -1,4 +1,5 @@
 // /Users/mustamusic/web/sorteos-lxm-server-clean/server.js
+import bannersRoutes from "./routes/banners.js"; 
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -11,6 +12,7 @@ import adminRoutes from "./routes/admin.js"; // ✅ agregado
 dotenv.config();
 
 const app = express();
+app.use("/api/banners", bannersRoutes); 
 app.use(cors());
 app.use(express.json());
 
