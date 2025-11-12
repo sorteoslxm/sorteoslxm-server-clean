@@ -13,21 +13,47 @@ import webhookRoutes from "./routes/webhook-pago.js";
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+// ✅ CORS configurado correctamente
+const allowedOrigins = [
+  "https://sorteoslxm.com",
+  "https://www.sorteoslxm.com",
+  "http://localhost:5173",
+  "http://localhost:3000"
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn("❌ CORS bloqueado para origen:", origin);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  })
+);
+
+// ✅ Middleware JSON
 app.use(express.json());
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 🔥 Test básico
+// 🔥 Rutas de prueba
 app.get("/", (req, res) => res.send("🚀 API Sorteos LXM online funcionando"));
 app.get("/api", (req, res) => res.json({ message: "API OK ✅" }));
 
-// 🔗 Rutas montadas con prefijo /api
+// 🔗 Rutas principales
 app.use("/api/sorteos", sorteosRoutes);
 app.use("/api/banners", bannersRoutes);
 app.use("/api/compra", compraRoutes);
 app.use("/api/webhook-pago", webhookRoutes);
-app.use("/api/admin", adminRoutes); // ✅ Admin con JWT
+app.use("/api/admin", adminRoutes); // ✅ Ruta protegida con JWT
 
+// ✅ Arranque del servidor
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`✅ Servidor corriendo en puerto ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`✅ Servidor corriendo en puerto ${PORT}`)
+);
