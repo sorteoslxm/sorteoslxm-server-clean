@@ -1,5 +1,4 @@
-// ✅ web/sorteoslxm-server-clean/server.js
-
+// /Users/mustamusic/web/sorteoslxm-server-clean/server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -19,14 +18,16 @@ app.use(express.json());
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+// 🔥 Test básico
 app.get("/", (req, res) => res.send("🚀 API Sorteos LXM online funcionando"));
 app.get("/api", (req, res) => res.json({ message: "API OK ✅" }));
 
+// 🔗 Rutas montadas con prefijo /api
 app.use("/api/sorteos", sorteosRoutes);
 app.use("/api/banners", bannersRoutes);
 app.use("/api/compra", compraRoutes);
 app.use("/api/webhook-pago", webhookRoutes);
-app.use("/api/admin", adminRoutes); // 👈 IMPORTANTE
+app.use("/api/admin", adminRoutes); // ✅ Admin con JWT
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`✅ Servidor corriendo en puerto ${PORT}`));
