@@ -3,7 +3,6 @@ const router = express.Router();
 
 /**
  * LOGIN SOLO CON CONTRASEÑA
- * Compatible con tu frontend actual
  */
 router.post("/login", (req, res) => {
   const { password } = req.body;
@@ -19,7 +18,7 @@ router.post("/login", (req, res) => {
     return res.json({ success: true });
   }
 
-  return res.status(401).json({ error: "Credenciales inválidas" });
+  return res.status(401).json({ error: "Contraseña incorrecta" });
 });
 
 export default router;

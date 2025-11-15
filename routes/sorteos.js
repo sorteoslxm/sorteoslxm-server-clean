@@ -1,37 +1,61 @@
-// /routes/sorteos.js
 import express from "express";
-import { db } from "../config/firebase.js";
+import { db } from "../firebase.js";
 
 const router = express.Router();
 
-// Obtener todos los sorteos
+/**
+ * Obtener todos los sorteos
+ */
 router.get("/", async (req, res) => {
   try {
-    const snapshot = await db.collection("sorteos").get();
-    const sorteos = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const snapshot = await db.collection("sorteos").orderBy("createdAt", "desc").get();
+    const sorteos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     res.json(sorteos);
-  } catch (err) {
-    console.error("Error al obtener sorteos:", err);
+  } catch (error) {
+    console.error("❌ Error al obtener sorteos:", error);
     res.status(500).json({ error: "Error al obtener sorteos" });
   }
 });
 
-// Crear sorteo (solo si está autenticado)
+/**
+ * Crear sorteo (sin token)
+ */
 router.post("/", async (req, res) => {
   try {
     const data = req.body;
-    const docRef = await db.collection("sorteos").add({
-      ...data,
-      createdAt: new Date(),
-    });
+    data.createdAt = new Date().toISOString();
 
-    res.json({ id: docRef.id });
-  } catch (err) {
-    console.error("Error al crear sorteo:", err);
+    const ref = await db.collection("sorteos").add(data);
+    res.json({ success: true, id: ref.id });
+  } catch (error) {
+    console.error("❌ Error al crear sorteo:", error);
     res.status(500).json({ error: "Error al crear sorteo" });
+  }
+});
+
+/**
+ * Editar sorteo (sin token)
+ */
+router.put("/:id", async (req, res) => {
+  try {
+    await db.collection("sorteos").doc(req.params.id).update(req.body);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("❌ Error al editar sorteo:", error);
+    res.status(500).json({ error: "Error al editar sorteo" });
+  }
+});
+
+/**
+ * Eliminar sorteo (sin token)
+ */
+router.delete("/:id", async (req, res) => {
+  try {
+    await db.collection("sorteos").doc(req.params.id).delete();
+    res.json({ success: true });
+  } catch (error) {
+    console.error("❌ Error al eliminar sorteo:", error);
+    res.status(500).json({ error: "Error al eliminar sorteo" });
   }
 });
 

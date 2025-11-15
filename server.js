@@ -1,4 +1,3 @@
-// /Users/mustamusic/web/sorteoslxm-server-clean/server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -14,46 +13,48 @@ dotenv.config();
 
 const app = express();
 
-// ✅ CORS configurado correctamente
+// ⭐ CORS CONFIGURADO CORRECTAMENTE PARA PRODUCCIÓN ⭐
 const allowedOrigins = [
   "https://sorteoslxm.com",
   "https://www.sorteoslxm.com",
-  "http://localhost:5173",
-  "http://localhost:3000"
+  "http://localhost:3000",
+  "http://localhost:5173"
 ];
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+    origin: function (origin, callback) {
+      // 🌎 Permitir peticiones sin origin (Render, Postman, etc.)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        console.warn("❌ CORS bloqueado para origen:", origin);
+        console.log("❌ Bloqueado por CORS:", origin);
         callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-// ✅ Middleware JSON
+// Middleware JSON
 app.use(express.json());
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 🔥 Rutas de prueba
-app.get("/", (req, res) => res.send("🚀 API Sorteos LXM online funcionando"));
-app.get("/api", (req, res) => res.json({ message: "API OK ✅" }));
+// Ruta de prueba
+app.get("/", (req, res) => res.send("🚀 API Sorteos LXM funcionando correctamente"));
+app.get("/api", (req, res) => res.json({ message: "API OK" }));
 
-// 🔗 Rutas principales
+// Rutas reales
 app.use("/api/sorteos", sorteosRoutes);
 app.use("/api/banners", bannersRoutes);
 app.use("/api/compra", compraRoutes);
 app.use("/api/webhook-pago", webhookRoutes);
-app.use("/api/admin", adminRoutes); // ✅ Ruta protegida con JWT
+app.use("/api/admin", adminRoutes);
 
-// ✅ Arranque del servidor
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () =>
-  console.log(`✅ Servidor corriendo en puerto ${PORT}`)
-);
+app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
