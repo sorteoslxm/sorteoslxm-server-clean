@@ -1,11 +1,10 @@
+// FILE: /Users/mustamusic/web/sorteoslxm-server-clean/routes/sorteos.js
+
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/**
- * Obtener todos los sorteos
- */
 router.get("/", async (req, res) => {
   try {
     const snapshot = await db.collection("sorteos").orderBy("createdAt", "desc").get();
@@ -17,14 +16,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-/**
- * Crear sorteo (sin token)
- */
 router.post("/", async (req, res) => {
   try {
     const data = req.body;
     data.createdAt = new Date().toISOString();
-
     const ref = await db.collection("sorteos").add(data);
     res.json({ success: true, id: ref.id });
   } catch (error) {
@@ -33,9 +28,6 @@ router.post("/", async (req, res) => {
   }
 });
 
-/**
- * Editar sorteo (sin token)
- */
 router.put("/:id", async (req, res) => {
   try {
     await db.collection("sorteos").doc(req.params.id).update(req.body);
@@ -46,9 +38,6 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-/**
- * Eliminar sorteo (sin token)
- */
 router.delete("/:id", async (req, res) => {
   try {
     await db.collection("sorteos").doc(req.params.id).delete();
