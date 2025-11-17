@@ -14,12 +14,15 @@ dotenv.config();
 
 const app = express();
 
-// ⭐ CORS PERMITIDO
+// ⭐ CORS PERMITIDO (incluye Vercel)
 const allowedOrigins = [
   "https://sorteoslxm.com",
   "https://www.sorteoslxm.com",
   "http://localhost:3000",
-  "http://localhost:5173"
+  "http://localhost:5173",
+
+  // ⭐ Agregada la URL actual del frontend en Vercel
+  "https://sorteoslxm-frontend-oot2ami3m-sorteoslxms-projects.vercel.app"
 ];
 
 app.use(
