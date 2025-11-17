@@ -9,11 +9,14 @@ router.post("/login", (req, res) => {
 
   if (!ADMIN_PASS) {
     console.error("❌ Falta ADMIN_PASS en Render");
-    return res.status(500).json({ error: "Error del servidor" });
+    return res.status(500).json({ error: "Error en configuración del servidor" });
   }
 
   if (password === ADMIN_PASS) {
-    return res.json({ success: true });
+    return res.json({
+      success: true,
+      token: "OK_ADMIN" // 🔥 el token que espera el frontend
+    });
   }
 
   return res.status(401).json({ error: "Contraseña incorrecta" });
