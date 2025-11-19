@@ -1,14 +1,12 @@
-// FILE: /Users/mustamusic/web/sorteoslxm-server-clean/routes/sorteos.js
-
+// FILE: routes/sorteos.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/**
- * 👉 GET /api/sorteos
- * Obtiene todos los sorteos ordenados por fecha
- */
+/* ===============================
+   🟦 1) OBTENER TODOS LOS SORTEOS
+   =============================== */
 router.get("/", async (req, res) => {
   try {
     const snapshot = await db
@@ -16,7 +14,7 @@ router.get("/", async (req, res) => {
       .orderBy("createdAt", "desc")
       .get();
 
-    const sorteos = snapshot.docs.map((doc) => ({
+    const sorteos = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     }));
@@ -28,51 +26,49 @@ router.get("/", async (req, res) => {
   }
 });
 
-/**
- * 👉 POST /api/sorteos
- * Crea un nuevo sorteo
- */
+/* =======================================
+   🟩 2) OBTENER UN SOLO SORTEO POR ID
+   ======================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const doc = await db.collection("sorteos").doc(id).get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ error: "Sorteo no encontrado" });
+    }
+
+    res.json({
+      id: doc.id,
+      ...doc.data(),
+    });
+  } catch (error) {
+    console.error("❌ Error al obtener sorteo:", error);
+    res.status(500).json({ error: "Error al obtener sorteo por ID" });
+  }
+});
+
+/* ===============================
+   🟧 3) CREAR SORTEO
+   =============================== */
 router.post("/", async (req, res) => {
   try {
     const data = req.body;
+
     data.createdAt = new Date().toISOString();
+    data.featured = data.featured || false; // destacado
+    data.bannerPrincipal = data.bannerPrincipal || false;
 
     const ref = await db.collection("sorteos").add(data);
 
-    res.json({ success: true, id: ref.id });
+    res.json({
+      success: true,
+      id: ref.id,
+    });
   } catch (error) {
     console.error("❌ Error al crear sorteo:", error);
     res.status(500).json({ error: "Error al crear sorteo" });
-  }
-});
-
-/**
- * 👉 PUT /api/sorteos/:id
- * Edita un sorteo por ID
- */
-router.put("/:id", async (req, res) => {
-  try {
-    await db.collection("sorteos").doc(req.params.id).update(req.body);
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("❌ Error al editar sorteo:", error);
-    res.status(500).json({ error: "Error al editar sorteo" });
-  }
-});
-
-/**
- * 👉 DELETE /api/sorteos/:id
- * Elimina un sorteo por ID
- */
-router.delete("/:id", async (req, res) => {
-  try {
-    await db.collection("sorteos").doc(req.params.id).delete();
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("❌ Error al eliminar sorteo:", error);
-    res.status(500).json({ error: "Error al eliminar sorteo" });
   }
 });
 
