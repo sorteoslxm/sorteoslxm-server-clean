@@ -1,92 +1,83 @@
+// FILE: routes/banners.js
 import express from "express";
 import { db } from "../config/firebase.js";
+
 const router = express.Router();
 
 // Obtener todos los banners
 router.get("/", async (req, res) => {
   try {
-    const snapshot = await db.collection("banners").orderBy("fecha", "desc").get();
-    const banners = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const snapshot = await db.collection("banners").get();
+    const banners = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
     res.json(banners);
-  } catch (error) {
-    console.error("Error al obtener banners:", error);
+  } catch (err) {
     res.status(500).json({ error: "Error al obtener banners" });
   }
 });
 
-// Crear banner
+// Crear nuevo banner
 router.post("/", async (req, res) => {
   try {
-    const { titulo, imagenUrl, link } = req.body;
-
-    if (!titulo || !imagenUrl)
-      return res.status(400).json({ error: "Faltan campos requeridos" });
-
-    const nuevoBanner = {
-      titulo,
-      imagenUrl,
-      link: link || null,
-      destacado: false,
-      principal: false,
-      fecha: new Date(),
-    };
-
-    const ref = await db.collection("banners").add(nuevoBanner);
-    res.json({ id: ref.id, ...nuevoBanner });
-  } catch (error) {
-    console.error("Error al agregar banner:", error);
-    res.status(500).json({ error: "Error al agregar banner" });
+    const data = req.body;
+    const ref = await db.collection("banners").add(data);
+    res.json({ success: true, id: ref.id });
+  } catch (err) {
+    res.status(500).json({ error: "Error al crear banner" });
   }
 });
 
 // Eliminar banner
 router.delete("/:id", async (req, res) => {
   try {
-    await db.collection("banners").doc(req.params.id).delete();
-    res.json({ message: "Banner eliminado" });
-  } catch (error) {
-    console.error("Error al eliminar banner:", error);
+    const { id } = req.params;
+    await db.collection("banners").doc(id).delete();
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: "Error al eliminar banner" });
   }
 });
 
-// Establecer banner destacado
+// Destacar banner
 router.put("/destacar/:id", async (req, res) => {
   try {
-    const id = req.params.id;
+    const { id } = req.params;
 
-    const snap = await db.collection("banners").get();
+    // Primero desmarcamos cualquier otro
+    const snapshot = await db.collection("banners").get();
     const batch = db.batch();
 
-    snap.forEach((doc) => {
+    snapshot.docs.forEach(doc => {
       batch.update(doc.ref, { destacado: doc.id === id });
     });
 
     await batch.commit();
+
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error al destacar banner:", error);
+  } catch (err) {
     res.status(500).json({ error: "Error al destacar banner" });
   }
 });
 
-// Establecer banner principal
+// Banner principal
 router.put("/principal/:id", async (req, res) => {
   try {
-    const id = req.params.id;
+    const { id } = req.params;
 
-    const snap = await db.collection("banners").get();
+    const snapshot = await db.collection("banners").get();
     const batch = db.batch();
 
-    snap.forEach((doc) => {
+    snapshot.docs.forEach(doc => {
       batch.update(doc.ref, { principal: doc.id === id });
     });
 
     await batch.commit();
+
     res.json({ success: true });
-  } catch (error) {
-    console.error("Error al marcar como principal:", error);
-    res.status(500).json({ error: "Error al marcar como principal" });
+  } catch (err) {
+    res.status(500).json({ error: "Error al marcar banner principal" });
   }
 });
 

@@ -72,4 +72,22 @@ router.post("/", async (req, res) => {
   }
 });
 
+/* =========================================
+   🟨 4) DESTACAR SORTEO (FEATURED = TRUE)
+   ========================================= */
+router.patch("/:id/destacar", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.collection("sorteos").doc(id).update({
+      featured: true,
+    });
+
+    res.json({ success: true, message: "Sorteo marcado como destacado" });
+  } catch (error) {
+    console.error("❌ Error al destacar sorteo:", error);
+    res.status(500).json({ error: "Error al destacar sorteo" });
+  }
+});
+
 export default router;

@@ -1,5 +1,4 @@
-// FILE: /Users/mustamusic/web/sorteoslxm-server-clean/server.js
-
+// FILE: server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -14,22 +13,28 @@ dotenv.config();
 
 const app = express();
 
-// ⭐ CORS PERMITIDO (incluye Vercel)
+/* ================================
+   🔵 CORS PERMITIDO (BACKEND)
+================================= */
 const allowedOrigins = [
   "https://sorteoslxm.com",
   "https://www.sorteoslxm.com",
+  "https://sorteos-lxm.vercel.app",
+
+  // Desarrollo local
   "http://localhost:3000",
   "http://localhost:5173",
-
-  // ⭐ Agregada la URL actual del frontend en Vercel
-  "https://sorteos-lxm.vercel.app"
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
+      // Permite requests sin origen (fetch interno, postman, etc.)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
 
       console.log("❌ Bloqueado por CORS:", origin);
       return callback(new Error("Not allowed by CORS"));
@@ -41,7 +46,9 @@ app.use(
 // Middleware
 app.use(express.json());
 
-// Rutas
+/* ================================
+   📌 RUTAS API
+================================= */
 app.get("/", (req, res) => res.send("API funcionando OK"));
 
 app.use("/api/sorteos", sorteosRoutes);
@@ -50,5 +57,8 @@ app.use("/api/banners", bannersRoutes);
 app.use("/api/compra", compraRoutes);
 app.use("/api/webhook-pago", webhookRoutes);
 
+/* ================================
+   🚀 SERVIDOR
+================================= */
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
