@@ -22,7 +22,7 @@ const allowedOrigins = [
   "http://localhost:5173",
 
   // ⭐ Agregada la URL actual del frontend en Vercel
-  "https://sorteoslxm-frontend-oot2ami3m-sorteoslxms-projects.vercel.app"
+  "https://sorteos-lxm.vercel.app"
 ];
 
 app.use(
