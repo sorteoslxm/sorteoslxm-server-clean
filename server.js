@@ -47,15 +47,16 @@ app.use(
 app.use(express.json());
 
 /* ================================
-   📌 RUTAS API
+   📌 RUTAS API (SIN /api)
 ================================= */
 app.get("/", (req, res) => res.send("API funcionando OK"));
 
-app.use("/api/sorteos", sorteosRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/banners", bannersRoutes);
-app.use("/api/compra", compraRoutes);
-app.use("/api/webhook-pago", webhookRoutes);
+// 🔥 VOLVEMOS A TU ESTRUCTURA ORIGINAL
+app.use("/sorteos", sorteosRoutes);
+app.use("/admin", adminRoutes);
+app.use("/banners", bannersRoutes);
+app.use("/compra", compraRoutes);
+app.use("/webhook-pago", webhookRoutes);
 
 /* ================================
    🚀 SERVIDOR
