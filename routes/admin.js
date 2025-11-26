@@ -15,7 +15,7 @@ router.post("/login", (req, res) => {
   if (password === ADMIN_PASS) {
     return res.json({
       success: true,
-      token: "OK_ADMIN" // 🔥 el token que espera el frontend
+      token: process.env.ADMIN_TOKEN
     });
   }
 
