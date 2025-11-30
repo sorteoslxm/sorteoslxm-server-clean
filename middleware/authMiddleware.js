@@ -1,13 +1,13 @@
-// middleware/authMiddleware.js
-import dotenv from "dotenv";
-dotenv.config();
-
+// FILE: middleware/authMiddleware.js
 export function verificarAdmin(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1];
-  const adminToken = process.env.ADMIN_TOKEN;
+  const token = req.headers["x-admin-token"]; // 👈 ESTE ES EL QUE USA TU FRONT
 
-  if (!token || token !== process.env.ADMIN_TOKEN) {
+  if (!token) {
     return res.status(401).json({ error: "No estás autenticado" });
+  }
+
+  if (token !== process.env.ADMIN_TOKEN) {
+    return res.status(401).json({ error: "Token inválido" });
   }
 
   next();
