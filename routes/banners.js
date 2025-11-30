@@ -1,153 +1,60 @@
 // FILE: routes/banners.js
 import express from "express";
-import { db } from "../config/firebase.js";
-import { verificarAdmin } from "../middleware/authMiddleware.js";
+import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
+import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* ================================
-   📌 CONFIG CLOUDINARY
-================================= */
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+// Configuración de multer (TEMPORAL)
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
-/* ================================
-   📌 LISTAR TODOS LOS BANNERS
-================================= */
+// Ruta: Obtener todos los banners
 router.get("/", async (req, res) => {
   try {
     const snap = await db.collection("banners").get();
-    const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.json(list);
+    const banners = snap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    res.json(banners);
   } catch (err) {
-    res.status(500).json({ error: "Error al obtener banners" });
+    res.status(500).json({ error: "Error obteniendo banners" });
   }
 });
 
-/* ================================
-   📌 OBTENER SEGÚN TIPO
-================================= */
-
-router.get("/principal", async (req, res) => {
+// Ruta: Subir banner
+router.post("/upload", upload.single("banner"), async (req, res) => {
   try {
-    const snap = await db
-      .collection("banners")
-      .where("principal", "==", true)
-      .limit(1)
-      .get();
+    if (!req.file) return res.status(400).json({ error: "Falta la imagen" });
 
-    if (snap.empty) return res.json(null);
+    const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
 
-    res.json({ id: snap.docs[0].id, ...snap.docs[0].data() });
-  } catch {
-    res.status(500).json({ error: "Error al obtener banner principal" });
-  }
-});
-
-router.get("/destacado", async (req, res) => {
-  try {
-    const snap = await db
-      .collection("banners")
-      .where("destacado", "==", true)
-      .limit(1)
-      .get();
-
-    if (snap.empty) return res.json(null);
-
-    res.json({ id: snap.docs[0].id, ...snap.docs[0].data() });
-  } catch {
-    res.status(500).json({ error: "Error al obtener banner destacado" });
-  }
-});
-
-router.get("/inferiores", async (req, res) => {
-  try {
-    const snap = await db.collection("banners").where("inferior", "==", true).get();
-    const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.json(list);
-  } catch {
-    res.status(500).json({ error: "Error al obtener banners inferiores" });
-  }
-});
-
-/* ================================
-   📌 SUBIR IMAGEN A CLOUDINARY
-================================= */
-router.post("/upload", verificarAdmin, async (req, res) => {
-  try {
-    const { image } = req.body;
-    if (!image) return res.status(400).json({ error: "Falta la imagen" });
-
-    const upload = await cloudinary.uploader.upload(image, {
-      folder: "banners_lxm"
+    const cloud = await cloudinary.uploader.upload(base64, {
+      folder: "banners"
     });
 
-    res.json({ url: upload.secure_url });
+    const doc = await db.collection("banners").add({
+      url: cloud.secure_url,
+      createdAt: Date.now()
+    });
+
+    res.json({ success: true, id: doc.id, url: cloud.secure_url });
+
   } catch (err) {
-    console.error("Cloudinary error:", err);
-    res.status(500).json({ error: "Error al subir imagen" });
+    console.error(err);
+    res.status(500).json({ error: "Error subiendo banner" });
   }
 });
 
-/* ================================
-   📌 CRUD ADMIN
-================================= */
-
-// Crear banner
-router.post("/", verificarAdmin, async (req, res) => {
-  try {
-    const nuevo = await db.collection("banners").add(req.body);
-    res.json({ id: nuevo.id });
-  } catch {
-    res.status(500).json({ error: "Error al crear banner" });
-  }
-});
-
-// Eliminar
-router.delete("/:id", verificarAdmin, async (req, res) => {
+// Ruta: eliminar banner
+router.delete("/:id", async (req, res) => {
   try {
     await db.collection("banners").doc(req.params.id).delete();
     res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Error al eliminar banner" });
-  }
-});
-
-// Marcar principal único
-router.put("/principal/:id", verificarAdmin, async (req, res) => {
-  try {
-    const ref = db.collection("banners");
-
-    const snap = await ref.where("principal", "==", true).get();
-    for (const doc of snap.docs) {
-      await ref.doc(doc.id).update({ principal: false });
-    }
-
-    await ref.doc(req.params.id).update({ principal: true });
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Error al marcar principal" });
-  }
-});
-
-// Marcar destacado único
-router.put("/destacado/:id", verificarAdmin, async (req, res) => {
-  try {
-    const ref = db.collection("banners");
-
-    const snap = await ref.where("destacado", "==", true).get();
-    for (const doc of snap.docs) {
-      await ref.doc(doc.id).update({ destacado: false });
-    }
-
-    await ref.doc(req.params.id).update({ destacado: true });
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Error al marcar destacado" });
+  } catch (err) {
+    res.status(500).json({ error: "Error eliminando banner" });
   }
 });
 
