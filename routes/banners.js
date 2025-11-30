@@ -2,8 +2,18 @@
 import express from "express";
 import { db } from "../config/firebase.js";
 import { verificarAdmin } from "../middleware/authMiddleware.js";
+import { v2 as cloudinary } from "cloudinary";
 
 const router = express.Router();
+
+/* ================================
+   📌 CONFIG CLOUDINARY
+================================= */
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 /* ================================
    📌 LISTAR TODOS LOS BANNERS
@@ -11,7 +21,7 @@ const router = express.Router();
 router.get("/", async (req, res) => {
   try {
     const snap = await db.collection("banners").get();
-    const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: "Error al obtener banners" });
@@ -24,8 +34,14 @@ router.get("/", async (req, res) => {
 
 router.get("/principal", async (req, res) => {
   try {
-    const snap = await db.collection("banners").where("principal", "==", true).limit(1).get();
+    const snap = await db
+      .collection("banners")
+      .where("principal", "==", true)
+      .limit(1)
+      .get();
+
     if (snap.empty) return res.json(null);
+
     res.json({ id: snap.docs[0].id, ...snap.docs[0].data() });
   } catch {
     res.status(500).json({ error: "Error al obtener banner principal" });
@@ -34,8 +50,14 @@ router.get("/principal", async (req, res) => {
 
 router.get("/destacado", async (req, res) => {
   try {
-    const snap = await db.collection("banners").where("destacado", "==", true).limit(1).get();
+    const snap = await db
+      .collection("banners")
+      .where("destacado", "==", true)
+      .limit(1)
+      .get();
+
     if (snap.empty) return res.json(null);
+
     res.json({ id: snap.docs[0].id, ...snap.docs[0].data() });
   } catch {
     res.status(500).json({ error: "Error al obtener banner destacado" });
@@ -45,10 +67,29 @@ router.get("/destacado", async (req, res) => {
 router.get("/inferiores", async (req, res) => {
   try {
     const snap = await db.collection("banners").where("inferior", "==", true).get();
-    const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     res.json(list);
   } catch {
     res.status(500).json({ error: "Error al obtener banners inferiores" });
+  }
+});
+
+/* ================================
+   📌 SUBIR IMAGEN A CLOUDINARY
+================================= */
+router.post("/upload", verificarAdmin, async (req, res) => {
+  try {
+    const { image } = req.body;
+    if (!image) return res.status(400).json({ error: "Falta la imagen" });
+
+    const upload = await cloudinary.uploader.upload(image, {
+      folder: "banners_lxm"
+    });
+
+    res.json({ url: upload.secure_url });
+  } catch (err) {
+    console.error("Cloudinary error:", err);
+    res.status(500).json({ error: "Error al subir imagen" });
   }
 });
 
