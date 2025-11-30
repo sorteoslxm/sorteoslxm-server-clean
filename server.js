@@ -19,6 +19,7 @@ const app = express();
 const allowedOrigins = [
   "https://sorteoslxm.com",
   "https://www.sorteoslxm.com",
+  "https://sorteos-2k7mrvg7d-sorteoslxms-projects.vercel.app",
   "https://sorteos-lxm.vercel.app",
 
   // Desarrollo local
@@ -51,7 +52,6 @@ app.use(express.json());
 ================================= */
 app.get("/", (req, res) => res.send("API funcionando OK"));
 
-// 🔥 VOLVEMOS A TU ESTRUCTURA ORIGINAL
 app.use("/sorteos", sorteosRoutes);
 app.use("/admin", adminRoutes);
 app.use("/banners", bannersRoutes);
