@@ -10,7 +10,7 @@ const router = express.Router();
    🔧 Config Cloudinary
 ================================= */
 cloudinary.config({
-cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
@@ -45,19 +45,16 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Falta la imagen" });
 
-    // Convierte el buffer en base64
     const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
 
-    // Sube a Cloudinary
     const cloud = await cloudinary.uploader.upload(base64, {
       folder: "banners"
     });
 
-    // Guarda en Firebase
     const doc = await db.collection("banners").add({
       url: cloud.secure_url,
-      destacado: false,     // 🔥 listo para usar
-      link: "",            // 🔥 listo para usar
+      destacado: false,
+      link: "",
       createdAt: Date.now()
     });
 
@@ -70,6 +67,49 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
     res.status(500).json({ error: "Error subiendo banner" });
+  }
+});
+
+/* ================================
+   ⭐ PATCH - Destacar banner
+================================= */
+router.patch("/:id/destacar", async (req, res) => {
+  try {
+    const snap = await db.collection("banners").get();
+    const batch = db.batch();
+
+    snap.forEach(doc => {
+      batch.update(doc.ref, { destacado: false });
+    });
+
+    batch.update(db.collection("banners").doc(req.params.id), {
+      destacado: true
+    });
+
+    await batch.commit();
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DESTACAR ERROR:", err);
+    res.status(500).json({ error: "Error destacando banner" });
+  }
+});
+
+/* ================================
+   🔗 PATCH - Actualizar link
+================================= */
+router.patch("/:id/link", async (req, res) => {
+  try {
+    const { link } = req.body;
+
+    await db.collection("banners").doc(req.params.id).update({
+      link: link || ""
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("LINK ERROR:", err);
+    res.status(500).json({ error: "Error actualizando link" });
   }
 });
 
