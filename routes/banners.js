@@ -80,8 +80,29 @@ router.get("/principal", async (req, res) => {
 router.get("/inferiores", async (req, res) => {
   try {
     const snap = await db.collection("banners")
+      router.get("/inferiores", async (req, res) => {
+  try {
+    const snap = await db.collection("banners")
       .where("destacado", "==", false)
-      .orderBy("createdAt", "desc")
+      .get();
+
+    // Normalizamos + agregamos test
+    let banners = snap.docs.map(doc => ({
+      titulo_test: "🔥 TEST OK — SERVER ACTUALIZADO 🔥",
+      ...normalizeBanner(doc),
+    }));
+
+    // Ordenamos manualmente por createdAt desc
+    banners.sort((a, b) => b.createdAt - a.createdAt);
+
+    res.json(banners);
+
+  } catch (err) {
+    console.error("GET /banners/inferiores ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo banners secundarios" });
+  }
+});
+
       .get();
 
     const banners = snap.docs.map(doc => ({
