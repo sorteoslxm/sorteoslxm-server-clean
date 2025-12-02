@@ -30,19 +30,22 @@ function normalizeBanner(doc) {
   return {
     id: doc.id,
     ...data,
-    // 🔥 Fuerza SIEMPRE boolean
-    destacado: data.destacado === true,
+    destacado: data.destacado === true, // fuerza booleano
   };
 }
 
 /* ================================
-   🔵 GET - Obtener todos los banners
+   🔵 GET - Todos
 ================================= */
 router.get("/", async (req, res) => {
   try {
-    const snap = await db.collection("banners").orderBy("createdAt", "desc").get();
+    const snap = await db.collection("banners")
+      .orderBy("createdAt", "desc")
+      .get();
+
     const banners = snap.docs.map(normalizeBanner);
     res.json(banners);
+
   } catch (err) {
     console.error("GET /banners ERROR:", err);
     res.status(500).json({ error: "Error obteniendo banners" });
@@ -50,13 +53,14 @@ router.get("/", async (req, res) => {
 });
 
 /* ================================
-   🔵 GET - Banner principal
+   🔵 GET - Principal
 ================================= */
 router.get("/principal", async (req, res) => {
   try {
     const snap = await db.collection("banners")
       .where("destacado", "==", true)
-      .limit(1).get();
+      .limit(1)
+      .get();
 
     if (snap.empty) return res.json(null);
 
@@ -70,7 +74,8 @@ router.get("/principal", async (req, res) => {
 });
 
 /* ================================
-   🔵 GET - Banners secundarios
+   🔵 GET - Inferiores
+   🧪 *Incluye titulo_test para verificar deploy*
 ================================= */
 router.get("/inferiores", async (req, res) => {
   try {
@@ -79,7 +84,11 @@ router.get("/inferiores", async (req, res) => {
       .orderBy("createdAt", "desc")
       .get();
 
-    const banners = snap.docs.map(normalizeBanner);
+    const banners = snap.docs.map(doc => ({
+      titulo_test: "🔥 TEST OK — ESTO VIENE DEL SERVER NUEVO 🔥",
+      ...normalizeBanner(doc),
+    }));
+
     res.json(banners);
 
   } catch (err) {
@@ -89,7 +98,7 @@ router.get("/inferiores", async (req, res) => {
 });
 
 /* ================================
-   🟢 POST - Subir banner
+   🟢 POST - Subir
 ================================= */
 router.post("/upload", upload.single("banner"), async (req, res) => {
   try {
@@ -114,19 +123,17 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
 });
 
 /* ================================
-   ⭐ PATCH - Destacar banner
+   ⭐ PATCH - Destacar
 ================================= */
 router.patch("/:id/destacar", async (req, res) => {
   try {
     const snap = await db.collection("banners").get();
     const batch = db.batch();
 
-    // Todos a false
     snap.forEach(doc => {
       batch.update(doc.ref, { destacado: false });
     });
 
-    // El seleccionado a true
     batch.update(db.collection("banners").doc(req.params.id), { destacado: true });
 
     await batch.commit();
@@ -140,7 +147,7 @@ router.patch("/:id/destacar", async (req, res) => {
 });
 
 /* ================================
-   🔗 PATCH - Actualizar link
+   🔗 PATCH - Link
 ================================= */
 router.patch("/:id/link", async (req, res) => {
   try {
@@ -155,7 +162,7 @@ router.patch("/:id/link", async (req, res) => {
 });
 
 /* ================================
-   🔴 DELETE - Eliminar banner
+   🔴 DELETE - Eliminar
 ================================= */
 router.delete("/:id", async (req, res) => {
   try {
