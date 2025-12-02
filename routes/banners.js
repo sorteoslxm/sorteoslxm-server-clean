@@ -1,4 +1,4 @@
-// FILE: routes/banners.js
+// FILE: sorteoslxm-server-clean/routes/banners.js
 import express from "express";
 import multer from "multer";
 import { v2 as cloudinary } from "cloudinary";
@@ -26,10 +26,14 @@ const upload = multer({ storage });
 ================================= */
 function normalizeBanner(doc) {
   const data = doc.data();
+
   return {
     id: doc.id,
-    ...data,
-    destacado: data.destacado === true
+    url: data.url || "",
+    link: data.link || "",
+    createdAt: data.createdAt || 0,
+    destacado: data.destacado === true,
+    titulo_test: "🔥 TEST OK — SERVER ACTUALIZADO 🔥"
   };
 }
 
@@ -43,15 +47,7 @@ router.get("/inferiores", async (req, res) => {
       .where("destacado", "==", false)
       .get();
 
-    let banners = snap.docs.map((doc) => {
-      const data = normalizeBanner(doc);
-      return {
-        ...data,
-        titulo_test: "🔥 TEST OK — SERVER ACTUALIZADO 🔥"
-      };
-    });
-
-    // Ordenar manualmente
+    let banners = snap.docs.map(normalizeBanner);
     banners.sort((a, b) => b.createdAt - a.createdAt);
 
     res.json(banners);
@@ -74,8 +70,7 @@ router.get("/principal", async (req, res) => {
 
     if (snap.empty) return res.json(null);
 
-    const banner = normalizeBanner(snap.docs[0]);
-    res.json(banner);
+    res.json(normalizeBanner(snap.docs[0]));
   } catch (err) {
     console.error("GET /banners/principal ERROR:", err);
     res.status(500).json({ error: "Error obteniendo banner principal" });
