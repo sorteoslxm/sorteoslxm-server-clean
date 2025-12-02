@@ -22,42 +22,52 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 /* ================================
-   🔵 Helper: normalizar banner
+   🟦 Normalizar banner
 ================================= */
 function normalizeBanner(doc) {
   const data = doc.data();
-
   return {
     id: doc.id,
     ...data,
-    destacado: data.destacado === true, // fuerza booleano
+    destacado: data.destacado === true
   };
 }
 
 /* ================================
-   🔵 GET - Todos
+   🟦 GET - Banners inferiores
 ================================= */
-router.get("/", async (req, res) => {
+router.get("/inferiores", async (req, res) => {
   try {
-    const snap = await db.collection("banners")
-      .orderBy("createdAt", "desc")
+    const snap = await db
+      .collection("banners")
+      .where("destacado", "==", false)
       .get();
 
-    const banners = snap.docs.map(normalizeBanner);
-    res.json(banners);
+    let banners = snap.docs.map((doc) => {
+      const data = normalizeBanner(doc);
+      return {
+        ...data,
+        titulo_test: "🔥 TEST OK — SERVER ACTUALIZADO 🔥"
+      };
+    });
 
+    // Ordenar manualmente
+    banners.sort((a, b) => b.createdAt - a.createdAt);
+
+    res.json(banners);
   } catch (err) {
-    console.error("GET /banners ERROR:", err);
-    res.status(500).json({ error: "Error obteniendo banners" });
+    console.error("GET /banners/inferiores ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo banners secundarios" });
   }
 });
 
 /* ================================
-   🔵 GET - Principal
+   🟦 GET - Banner principal
 ================================= */
 router.get("/principal", async (req, res) => {
   try {
-    const snap = await db.collection("banners")
+    const snap = await db
+      .collection("banners")
       .where("destacado", "==", true)
       .limit(1)
       .get();
@@ -66,7 +76,6 @@ router.get("/principal", async (req, res) => {
 
     const banner = normalizeBanner(snap.docs[0]);
     res.json(banner);
-
   } catch (err) {
     console.error("GET /banners/principal ERROR:", err);
     res.status(500).json({ error: "Error obteniendo banner principal" });
@@ -74,52 +83,25 @@ router.get("/principal", async (req, res) => {
 });
 
 /* ================================
-   🔵 GET - Inferiores
-   🧪 *Incluye titulo_test para verificar deploy*
+   🟦 GET - Todos los banners
 ================================= */
-router.get("/inferiores", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const snap = await db.collection("banners")
-      router.get("/inferiores", async (req, res) => {
-  try {
-    const snap = await db.collection("banners")
-      .where("destacado", "==", false)
+    const snap = await db
+      .collection("banners")
+      .orderBy("createdAt", "desc")
       .get();
 
-    // Normalizamos + agregamos test
-    let banners = snap.docs.map(doc => ({
-      titulo_test: "🔥 TEST OK — SERVER ACTUALIZADO 🔥",
-      ...normalizeBanner(doc),
-    }));
-
-    // Ordenamos manualmente por createdAt desc
-    banners.sort((a, b) => b.createdAt - a.createdAt);
-
+    const banners = snap.docs.map(normalizeBanner);
     res.json(banners);
-
   } catch (err) {
-    console.error("GET /banners/inferiores ERROR:", err);
-    res.status(500).json({ error: "Error obteniendo banners secundarios" });
-  }
-});
-
-      .get();
-
-    const banners = snap.docs.map(doc => ({
-      titulo_test: "🔥 TEST OK — ESTO VIENE DEL SERVER NUEVO 🔥",
-      ...normalizeBanner(doc),
-    }));
-
-    res.json(banners);
-
-  } catch (err) {
-    console.error("GET /banners/inferiores ERROR:", err);
-    res.status(500).json({ error: "Error obteniendo banners secundarios" });
+    console.error("GET /banners ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo banners" });
   }
 });
 
 /* ================================
-   🟢 POST - Subir
+   🟩 POST - Subir banner
 ================================= */
 router.post("/upload", upload.single("banner"), async (req, res) => {
   try {
@@ -136,7 +118,6 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
     });
 
     res.json({ success: true, id: doc.id, url: cloud.secure_url });
-
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
     res.status(500).json({ error: "Error subiendo banner" });
@@ -144,23 +125,23 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
 });
 
 /* ================================
-   ⭐ PATCH - Destacar
+   ⭐ PATCH - Destacar banner
 ================================= */
 router.patch("/:id/destacar", async (req, res) => {
   try {
     const snap = await db.collection("banners").get();
     const batch = db.batch();
 
-    snap.forEach(doc => {
+    snap.forEach((doc) => {
       batch.update(doc.ref, { destacado: false });
     });
 
-    batch.update(db.collection("banners").doc(req.params.id), { destacado: true });
+    batch.update(db.collection("banners").doc(req.params.id), {
+      destacado: true
+    });
 
     await batch.commit();
-
     res.json({ success: true });
-
   } catch (err) {
     console.error("DESTACAR ERROR:", err);
     res.status(500).json({ error: "Error destacando banner" });
@@ -168,14 +149,15 @@ router.patch("/:id/destacar", async (req, res) => {
 });
 
 /* ================================
-   🔗 PATCH - Link
+   🔗 PATCH - Actualizar link
 ================================= */
 router.patch("/:id/link", async (req, res) => {
   try {
     const { link } = req.body;
-    await db.collection("banners").doc(req.params.id).update({ link: link || "" });
+    await db.collection("banners").doc(req.params.id).update({
+      link: link || ""
+    });
     res.json({ success: true });
-
   } catch (err) {
     console.error("LINK ERROR:", err);
     res.status(500).json({ error: "Error actualizando link" });
@@ -183,13 +165,12 @@ router.patch("/:id/link", async (req, res) => {
 });
 
 /* ================================
-   🔴 DELETE - Eliminar
+   🗑 DELETE - Eliminar banner
 ================================= */
 router.delete("/:id", async (req, res) => {
   try {
     await db.collection("banners").doc(req.params.id).delete();
     res.json({ success: true });
-
   } catch (err) {
     console.error("DELETE ERROR:", err);
     res.status(500).json({ error: "Error eliminando banner" });
