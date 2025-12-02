@@ -90,4 +90,37 @@ router.patch("/:id/destacar", async (req, res) => {
   }
 });
 
+/* ===============================
+   🟪 5) EDITAR SORTEO (PUT)
+   =============================== */
+router.put("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = req.body;
+
+    await db.collection("sorteos").doc(id).update(data);
+
+    res.json({ success: true, message: "Sorteo actualizado" });
+  } catch (error) {
+    console.error("❌ Error al editar sorteo:", error);
+    res.status(500).json({ error: "Error al editar sorteo" });
+  }
+});
+
+/* ===============================
+   🟥 6) ELIMINAR SORTEO (DELETE)
+   =============================== */
+router.delete("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.collection("sorteos").doc(id).delete();
+
+    res.json({ success: true, message: "Sorteo eliminado" });
+  } catch (error) {
+    console.error("❌ Error al eliminar sorteo:", error);
+    res.status(500).json({ error: "Error al eliminar sorteo" });
+  }
+});
+
 export default router;
