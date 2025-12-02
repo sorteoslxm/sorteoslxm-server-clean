@@ -56,11 +56,18 @@ router.post("/", async (req, res) => {
   try {
     const data = req.body;
 
-    data.createdAt = new Date().toISOString();
-    data.featured = data.featured || false; // destacado
-    data.bannerPrincipal = data.bannerPrincipal || false;
+    const nuevo = {
+      titulo: data.titulo || "",
+      descripcion: data.descripcion || "",
+      precio: Number(data.precio) || 0,
+      imagen: data.imagen || "",
+      imagenMiniatura: data.imagenMiniatura || "",
+      bannerPrincipal: data.bannerPrincipal || false,
+      featured: data.featured || false,
+      createdAt: new Date().toISOString(),
+    };
 
-    const ref = await db.collection("sorteos").add(data);
+    const ref = await db.collection("sorteos").add(nuevo);
 
     res.json({
       success: true,
@@ -73,7 +80,7 @@ router.post("/", async (req, res) => {
 });
 
 /* =========================================
-   🟨 4) DESTACAR SORTEO (FEATURED = TRUE)
+   🟨 4) DESTACAR SORTEO
    ========================================= */
 router.patch("/:id/destacar", async (req, res) => {
   try {
@@ -83,7 +90,7 @@ router.patch("/:id/destacar", async (req, res) => {
       featured: true,
     });
 
-    res.json({ success: true, message: "Sorteo marcado como destacado" });
+    res.json({ success: true, message: "Sorteo destacado" });
   } catch (error) {
     console.error("❌ Error al destacar sorteo:", error);
     res.status(500).json({ error: "Error al destacar sorteo" });
@@ -91,14 +98,27 @@ router.patch("/:id/destacar", async (req, res) => {
 });
 
 /* ===============================
-   🟪 5) EDITAR SORTEO (PUT)
+   🟪 5) EDITAR SORTEO
    =============================== */
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
 
-    await db.collection("sorteos").doc(id).update(data);
+    const actualizado = {
+      titulo: data.titulo ?? "",
+      descripcion: data.descripcion ?? "",
+      precio: Number(data.precio) ?? 0,
+      imagen: data.imagen ?? "",
+      imagenMiniatura: data.imagenMiniatura ?? "",
+      bannerPrincipal: data.bannerPrincipal ?? false,
+      featured: data.featured ?? false,
+    };
+
+    // Evitar que editedAt sea undefined
+    actualizado.editedAt = new Date().toISOString();
+
+    await db.collection("sorteos").doc(id).update(actualizado);
 
     res.json({ success: true, message: "Sorteo actualizado" });
   } catch (error) {
@@ -108,7 +128,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* ===============================
-   🟥 6) ELIMINAR SORTEO (DELETE)
+   🟥 6) ELIMINAR SORTEO
    =============================== */
 router.delete("/:id", async (req, res) => {
   try {
