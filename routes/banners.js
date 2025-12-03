@@ -32,8 +32,7 @@ function normalizeBanner(doc) {
     url: data.url || "",
     link: data.link || "",
     createdAt: data.createdAt || 0,
-    destacado: data.destacado === true,
-    titulo_test: "🔥 TEST OK — SERVER ACTUALIZADO 🔥"
+    destacado: data.destacado === true
   };
 }
 

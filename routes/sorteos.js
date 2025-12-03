@@ -4,54 +4,57 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* ===============================
-   🟦 1) OBTENER TODOS LOS SORTEOS
-   =============================== */
+/* =============================================
+   1) GET TODOS LOS SORTEOS
+   ============================================= */
 router.get("/", async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("sorteos")
-      .orderBy("createdAt", "desc")
-      .get();
+    const snapshot = await db.collection("sorteos").get();
 
     const sorteos = snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
     }));
 
-    res.json(sorteos);
+    // Ordenar:
+    // 1) sorteoPrincipal primero
+    // 2) destacados después
+    // 3) el resto por fecha
+    const ordenados = sorteos.sort((a, b) => {
+      if (a.sorteoPrincipal) return -1;
+      if (b.sorteoPrincipal) return 1;
+      if (a.destacado && !b.destacado) return -1;
+      if (b.destacado && !a.destacado) return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    res.json(ordenados);
   } catch (error) {
     console.error("❌ Error al obtener sorteos:", error);
     res.status(500).json({ error: "Error al obtener sorteos" });
   }
 });
 
-/* =======================================
-   🟩 2) OBTENER UN SOLO SORTEO POR ID
-   ======================================= */
+/* =============================================
+   2) GET POR ID
+   ============================================= */
 router.get("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const doc = await db.collection("sorteos").doc(req.params.id).get();
 
-    const doc = await db.collection("sorteos").doc(id).get();
-
-    if (!doc.exists) {
+    if (!doc.exists)
       return res.status(404).json({ error: "Sorteo no encontrado" });
-    }
 
-    res.json({
-      id: doc.id,
-      ...doc.data(),
-    });
+    res.json({ id: doc.id, ...doc.data() });
   } catch (error) {
     console.error("❌ Error al obtener sorteo:", error);
     res.status(500).json({ error: "Error al obtener sorteo por ID" });
   }
 });
 
-/* ===============================
-   🟧 3) CREAR SORTEO
-   =============================== */
+/* =============================================
+   3) CREAR SORTEO
+   ============================================= */
 router.post("/", async (req, res) => {
   try {
     const data = req.body;
@@ -63,12 +66,23 @@ router.post("/", async (req, res) => {
       numerosTotales: Number(data.numerosTotales) || 0,
       imagenUrl: data.imagenUrl || "",
       mpCuenta: data.mpCuenta || "",
-      destacado: data.destacado || false,
-      sorteoPrincipal: data.sorteoPrincipal || false,
+      destacado: !!data.destacado,
+      sorteoPrincipal: !!data.sorteoPrincipal,
       createdAt: new Date().toISOString(),
     };
 
+    // si este es principal, borrar otros principales
+    if (nuevo.sorteoPrincipal) {
+      const prev = await db
+        .collection("sorteos")
+        .where("sorteoPrincipal", "==", true)
+        .get();
+
+      prev.forEach(d => d.ref.update({ sorteoPrincipal: false }));
+    }
+
     const ref = await db.collection("sorteos").add(nuevo);
+
     res.json({ success: true, id: ref.id });
   } catch (error) {
     console.error("❌ Error al crear sorteo:", error);
@@ -76,71 +90,34 @@ router.post("/", async (req, res) => {
   }
 });
 
-/* ===============================
-   🟪 4) EDITAR SORTEO
-   =============================== */
+/* =============================================
+   4) EDITAR
+   ============================================= */
 router.put("/:id", async (req, res) => {
   try {
-    const { id } = req.params;
     const data = req.body;
 
-    const actualizado = {
-      titulo: data.titulo,
-      descripcion: data.descripcion,
-      precio: Number(data.precio),
-      numerosTotales: Number(data.numerosTotales),
-      imagenUrl: data.imagenUrl,
-      mpCuenta: data.mpCuenta,
-      destacado: data.destacado,
-      sorteoPrincipal: data.sorteoPrincipal,
+    // si cambia principal → resetear otros
+    if (data.sorteoPrincipal) {
+      const prev = await db
+        .collection("sorteos")
+        .where("sorteoPrincipal", "==", true)
+        .get();
+
+      prev.forEach(d => {
+        if (d.id !== req.params.id) d.ref.update({ sorteoPrincipal: false });
+      });
+    }
+
+    await db.collection("sorteos").doc(req.params.id).update({
+      ...data,
       editedAt: new Date().toISOString(),
-    };
+    });
 
-    await db.collection("sorteos").doc(id).update(actualizado);
-
-    res.json({ success: true, message: "Sorteo actualizado" });
+    res.json({ success: true });
   } catch (error) {
     console.error("❌ Error al editar sorteo:", error);
     res.status(500).json({ error: "Error al editar sorteo" });
-  }
-});
-
-/* ===============================
-   🟥 5) ELIMINAR SORTEO
-   =============================== */
-router.delete("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    await db.collection("sorteos").doc(id).delete();
-
-    res.json({ success: true, message: "Sorteo eliminado" });
-  } catch (error) {
-    console.error("❌ Error al eliminar sorteo:", error);
-    res.status(500).json({ error: "Error al eliminar sorteo" });
-  }
-});
-
-/* ======================================
-   🟨 6) OBTENER EL SORTEO PRINCIPAL
-   ====================================== */
-router.get("/principal/active", async (req, res) => {
-  try {
-    const snapshot = await db
-      .collection("sorteos")
-      .where("sorteoPrincipal", "==", true)
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
-      return res.json(null);
-    }
-
-    const doc = snapshot.docs[0];
-    res.json({ id: doc.id, ...doc.data() });
-  } catch (error) {
-    console.error("❌ Error al obtener sorteo principal:", error);
-    res.status(500).json({ error: "Error al obtener sorteo principal" });
   }
 });
 
