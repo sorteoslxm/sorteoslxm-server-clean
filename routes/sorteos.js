@@ -60,45 +60,24 @@ router.post("/", async (req, res) => {
       titulo: data.titulo || "",
       descripcion: data.descripcion || "",
       precio: Number(data.precio) || 0,
-      imagen: data.imagen || "",
-      imagenMiniatura: data.imagenMiniatura || "",
-      bannerPrincipal: data.bannerPrincipal || false,
-      featured: data.featured || false,
+      numerosTotales: Number(data.numerosTotales) || 0,
+      imagenUrl: data.imagenUrl || "",
+      mpCuenta: data.mpCuenta || "",
+      destacado: data.destacado || false,
       createdAt: new Date().toISOString(),
     };
 
     const ref = await db.collection("sorteos").add(nuevo);
 
-    res.json({
-      success: true,
-      id: ref.id,
-    });
+    res.json({ success: true, id: ref.id });
   } catch (error) {
     console.error("❌ Error al crear sorteo:", error);
     res.status(500).json({ error: "Error al crear sorteo" });
   }
 });
 
-/* =========================================
-   🟨 4) DESTACAR SORTEO
-   ========================================= */
-router.patch("/:id/destacar", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    await db.collection("sorteos").doc(id).update({
-      featured: true,
-    });
-
-    res.json({ success: true, message: "Sorteo destacado" });
-  } catch (error) {
-    console.error("❌ Error al destacar sorteo:", error);
-    res.status(500).json({ error: "Error al destacar sorteo" });
-  }
-});
-
 /* ===============================
-   🟪 5) EDITAR SORTEO
+   🟪 4) EDITAR SORTEO
    =============================== */
 router.put("/:id", async (req, res) => {
   try {
@@ -106,17 +85,15 @@ router.put("/:id", async (req, res) => {
     const data = req.body;
 
     const actualizado = {
-      titulo: data.titulo ?? "",
-      descripcion: data.descripcion ?? "",
-      precio: Number(data.precio) ?? 0,
-      imagen: data.imagen ?? "",
-      imagenMiniatura: data.imagenMiniatura ?? "",
-      bannerPrincipal: data.bannerPrincipal ?? false,
-      featured: data.featured ?? false,
+      titulo: data.titulo,
+      descripcion: data.descripcion,
+      precio: Number(data.precio),
+      numerosTotales: Number(data.numerosTotales),
+      imagenUrl: data.imagenUrl,
+      mpCuenta: data.mpCuenta,
+      destacado: data.destacado,
+      editedAt: new Date().toISOString(),
     };
-
-    // Evitar que editedAt sea undefined
-    actualizado.editedAt = new Date().toISOString();
 
     await db.collection("sorteos").doc(id).update(actualizado);
 
@@ -128,7 +105,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* ===============================
-   🟥 6) ELIMINAR SORTEO
+   🟥 5) ELIMINAR SORTEO
    =============================== */
 router.delete("/:id", async (req, res) => {
   try {
