@@ -64,11 +64,11 @@ router.post("/", async (req, res) => {
       imagenUrl: data.imagenUrl || "",
       mpCuenta: data.mpCuenta || "",
       destacado: data.destacado || false,
+      sorteoPrincipal: data.sorteoPrincipal || false,
       createdAt: new Date().toISOString(),
     };
 
     const ref = await db.collection("sorteos").add(nuevo);
-
     res.json({ success: true, id: ref.id });
   } catch (error) {
     console.error("❌ Error al crear sorteo:", error);
@@ -92,6 +92,7 @@ router.put("/:id", async (req, res) => {
       imagenUrl: data.imagenUrl,
       mpCuenta: data.mpCuenta,
       destacado: data.destacado,
+      sorteoPrincipal: data.sorteoPrincipal,
       editedAt: new Date().toISOString(),
     };
 
@@ -117,6 +118,29 @@ router.delete("/:id", async (req, res) => {
   } catch (error) {
     console.error("❌ Error al eliminar sorteo:", error);
     res.status(500).json({ error: "Error al eliminar sorteo" });
+  }
+});
+
+/* ======================================
+   🟨 6) OBTENER EL SORTEO PRINCIPAL
+   ====================================== */
+router.get("/principal/active", async (req, res) => {
+  try {
+    const snapshot = await db
+      .collection("sorteos")
+      .where("sorteoPrincipal", "==", true)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return res.json(null);
+    }
+
+    const doc = snapshot.docs[0];
+    res.json({ id: doc.id, ...doc.data() });
+  } catch (error) {
+    console.error("❌ Error al obtener sorteo principal:", error);
+    res.status(500).json({ error: "Error al obtener sorteo principal" });
   }
 });
 
