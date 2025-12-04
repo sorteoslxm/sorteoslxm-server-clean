@@ -1,4 +1,4 @@
-// FILE: /Users/mustamusic/web/sorteoslxm-server-clean/routes/mercadopago.js
+// FILE: web/sorteoslxm-server-clean/routes/mercadopago.js
 import express from "express";
 import mercadopago from "mercadopago";
 import { db } from "../config/firebase.js";
@@ -7,74 +7,98 @@ const router = express.Router();
 
 /**
  * POST /mercadopago/crear-preferencia
- * Body: { titulo, precio, mpCuenta, sorteoId, telefono }
+ * body: { titulo, precio, mpCuenta, sorteoId, telefono, cantidad }
  *
- * Flujo:
- * 1) Creamos un documento en /compras (status: pending)
- * 2) Creamos la preferencia en MercadoPago con external_reference = purchaseId
- * 3) Actualizamos la compra con mpPreferenceId e init_point
- * 4) Respondemos init_point al frontend para redirigir al checkout
+ * mpCuenta debe ser el nombre de la env var (ej: "MERCADOPAGO_ACCESS_TOKEN_1")
  */
 router.post("/crear-preferencia", async (req, res) => {
   try {
-    const { titulo, precio, mpCuenta, sorteoId, telefono } = req.body;
+    const { titulo, precio, mpCuenta, sorteoId, telefono, cantidad = 1 } = req.body;
 
-    // 1) token según mpCuenta (ej: "MERCADOPAGO_ACCESS_TOKEN_1")
+    if (!titulo || !precio || !mpCuenta || !sorteoId) {
+      return res.status(400).json({ error: "Faltan datos obligatorios" });
+    }
+
+    // obtener token desde env
     const token = process.env[mpCuenta];
     if (!token) return res.status(400).json({ error: "Cuenta MercadoPago inválida" });
 
-    // 2) crear documento compra PENDING en Firestore
-    const compraRef = await db.collection("compras").add({
-      sorteoId: sorteoId || null,
-      precio: Number(precio) || 0,
-      telefono: telefono || "",
-      estado: "pending",
-      createdAt: Date.now(),
-    });
-
-    const purchaseId = compraRef.id;
-
-    // 3) configurar mercadopago con el token seleccionado
     mercadopago.configure({ access_token: token });
 
-    // 4) crear preferencia con external_reference = purchaseId
+    // Transacción Firestore: chequear y decrementar numerosDisponibles, crear compra pendiente
+    const sorteoRef = db.collection("sorteos").doc(sorteoId);
+    let compraDocRef = null;
+    const result = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(sorteoRef);
+      if (!snap.exists) throw new Error("Sorteo no encontrado");
+      const data = snap.data();
+      const disponibles = Number(data.numerosDisponibles ?? data.numerosTotales ?? 0);
+
+      if (disponibles < cantidad) {
+        throw new Error("No quedan números disponibles");
+      }
+
+      // decrementar
+      tx.update(sorteoRef, { numerosDisponibles: disponibles - cantidad });
+
+      // crear documento de compra provisional con status 'pending'
+      const compra = {
+        sorteoId,
+        cantidad,
+        telefono: telefono || "",
+        mpCuenta,
+        precio: Number(precio),
+        status: "pending",
+        createdAt: Date.now(),
+      };
+
+      compraDocRef = await db.collection("compras").add(compra);
+      return { compraId: compraDocRef.id };
+    });
+
+    // crear preferencia MP
     const preference = {
       items: [
         {
-          title: titulo || "Sorteo",
-          unit_price: Number(precio) || 0,
-          quantity: 1,
+          title: titulo,
+          unit_price: Number(precio),
+          quantity: Number(cantidad),
         },
       ],
-      external_reference: purchaseId,
       back_urls: {
-        success: "https://sorteoslxm.com/pago-exito",
-        pending: "https://sorteoslxm.com/pago-pendiente",
-        failure: "https://sorteoslxm.com/pago-error",
+        success: process.env.BACK_URL_SUCCESS || "https://sorteoslxm.com/pago-exito",
+        failure: process.env.BACK_URL_FAILURE || "https://sorteoslxm.com/pago-error",
+        pending: process.env.BACK_URL_PENDING || "https://sorteoslxm.com/pago-pendiente",
       },
       auto_return: "approved",
+      external_reference: result.compraId, // guardamos referencia para cross-check
     };
 
-    const response = await mercadopago.preferences.create(preference);
+    const mpRes = await mercadopago.preferences.create(preference);
+    const mpInfo = mpRes && mpRes.response ? mpRes.response : mpRes;
 
-    // 5) guardar datos de preferencia en la compra
-    await compraRef.update({
-      mpPreferenceId: response.body.id,
-      init_point: response.body.init_point,
-      estado: "pending",
-      mpAccount: mpCuenta || "",
+    // actualizar compra con datos mp (preference id / init_point)
+    await db.collection("compras").doc(result.compraId).update({
+      mpPreferenceId: mpInfo.id,
+      mpInitPoint: mpInfo.init_point || "",
+      mpSandbox: !!mpInfo.init_point?.includes("sandbox"),
+      status: "pending",
     });
 
-    // 6) responder init_point
+    // devolver lo que necesita el frontend (init_point preferible)
     res.json({
-      success: true,
-      id: response.body.id,
-      init_point: response.body.init_point,
-      purchaseId,
+      ok: true,
+      preference: {
+        id: mpInfo.id,
+        init_point: mpInfo.init_point,
+        sandbox_init_point: mpInfo.sandbox_init_point,
+      },
+      compraId: result.compraId,
     });
   } catch (err) {
-    console.error("ERROR crear-preferencia:", err);
-    res.status(500).json({ error: "Error creando preferencia" });
+    console.error("POST /mercadopago/crear-preferencia ERROR:", err);
+    // Si hubo error con la transacción Firestore, intentar limpiar no necesario aquí (tx falla automáticamente)
+    res.status(500).json({ error: err.message || "Error creando preferencia" });
   }
 });
 
