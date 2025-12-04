@@ -4,13 +4,15 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* 🟦 Obtener todos los sorteos */
+/* ======================================================
+   🟦 Obtener todos los sorteos
+====================================================== */
 router.get("/", async (req, res) => {
   try {
     const snap = await db.collection("sorteos").get();
     const lista = snap.docs.map(doc => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
     }));
 
     res.json(lista);
@@ -20,27 +22,38 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* 🟩 Editar sorteo (seguro y completo) */
+/* ======================================================
+   🟩 Editar sorteo (seguro + campos nuevos)
+====================================================== */
 router.put("/:id", async (req, res) => {
   try {
     const id = req.params.id;
     let data = req.body;
 
-    // 🛡 Evitar guardar valores undefined o null
-    Object.keys(data).forEach(key => {
-      if (data[key] === undefined || data[key] === null) {
-        delete data[key];
-      }
+    // ❌ No guardar undefined o null
+    Object.keys(data).forEach((key) => {
+      if (data[key] === undefined) delete data[key];
     });
 
-    // 🔢 Convertir números correctamente
-    if (data.precio) data.precio = Number(data.precio);
-    if (data.numerosTotales) data.numerosTotales = Number(data.numerosTotales);
-    if (data.activarAutoUltimas) data.activarAutoUltimas = Number(data.activarAutoUltimas);
+    // 🔢 Forzar numéricos
+    if ("precio" in data) data.precio = Number(data.precio);
+    if ("numerosTotales" in data) data.numerosTotales = Number(data.numerosTotales);
+    if ("activarAutoUltimas" in data)
+      data.activarAutoUltimas = Number(data.activarAutoUltimas);
+
+    // 🔘 Booleanos manuales
+    if ("mostrarCuentaRegresiva" in data)
+      data.mostrarCuentaRegresiva = Boolean(data.mostrarCuentaRegresiva);
+
+    if ("destacado" in data)
+      data.destacado = Boolean(data.destacado);
+
+    if ("sorteoPrincipal" in data)
+      data.sorteoPrincipal = Boolean(data.sorteoPrincipal);
 
     await db.collection("sorteos").doc(id).update({
       ...data,
-      editedAt: new Date().toISOString()
+      editedAt: new Date().toISOString(),
     });
 
     res.json({ ok: true });
