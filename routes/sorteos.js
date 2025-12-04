@@ -1,11 +1,11 @@
-// FILE: routes/sorteos.js
+// FILE: /Users/mustamusic/web/sorteoslxm-server-clean/routes/sorteos.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
 /* =============================================
-   1) GET TODOS LOS SORTEOS
+   GET TODOS LOS SORTEOS
    ============================================= */
 router.get("/", async (req, res) => {
   try {
@@ -16,10 +16,6 @@ router.get("/", async (req, res) => {
       ...doc.data(),
     }));
 
-    // Ordenar:
-    // 1) sorteoPrincipal primero
-    // 2) destacados después
-    // 3) el resto por fecha
     const ordenados = sorteos.sort((a, b) => {
       if (a.sorteoPrincipal) return -1;
       if (b.sorteoPrincipal) return 1;
@@ -36,24 +32,23 @@ router.get("/", async (req, res) => {
 });
 
 /* =============================================
-   2) GET POR ID
+   GET POR ID
    ============================================= */
 router.get("/:id", async (req, res) => {
   try {
     const doc = await db.collection("sorteos").doc(req.params.id).get();
-
     if (!doc.exists)
       return res.status(404).json({ error: "Sorteo no encontrado" });
 
     res.json({ id: doc.id, ...doc.data() });
   } catch (error) {
-    console.error("❌ Error al obtener sorteo:", error);
-    res.status(500).json({ error: "Error al obtener sorteo por ID" });
+    console.error("❌ Error:", error);
+    res.status(500).json({ error: "Error al obtener sorteo" });
   }
 });
 
 /* =============================================
-   3) CREAR SORTEO
+   CREAR SORTEO
    ============================================= */
 router.post("/", async (req, res) => {
   try {
@@ -64,17 +59,20 @@ router.post("/", async (req, res) => {
       descripcion: data.descripcion || "",
       precio: Number(data.precio) || 0,
       numerosTotales: Number(data.numerosTotales) || 0,
+      numerosDisponibles: Number(data.numerosTotales) || 0,
       imagenUrl: data.imagenUrl || "",
       mpCuenta: data.mpCuenta || "",
       destacado: !!data.destacado,
       sorteoPrincipal: !!data.sorteoPrincipal,
+      mostrarCuentaRegresiva: !!data.mostrarCuentaRegresiva,
+      textoCuentaRegresiva: data.textoCuentaRegresiva || "",
       createdAt: new Date().toISOString(),
+      activo: true,
     };
 
-    // si este es principal, borrar otros principales
+    // Si este es principal → resetear otros
     if (nuevo.sorteoPrincipal) {
-      const prev = await db
-        .collection("sorteos")
+      const prev = await db.collection("sorteos")
         .where("sorteoPrincipal", "==", true)
         .get();
 
@@ -82,8 +80,8 @@ router.post("/", async (req, res) => {
     }
 
     const ref = await db.collection("sorteos").add(nuevo);
-
     res.json({ success: true, id: ref.id });
+
   } catch (error) {
     console.error("❌ Error al crear sorteo:", error);
     res.status(500).json({ error: "Error al crear sorteo" });
@@ -91,16 +89,15 @@ router.post("/", async (req, res) => {
 });
 
 /* =============================================
-   4) EDITAR
+   EDITAR
    ============================================= */
 router.put("/:id", async (req, res) => {
   try {
     const data = req.body;
 
-    // si cambia principal → resetear otros
+    // Cambio de sorteo principal
     if (data.sorteoPrincipal) {
-      const prev = await db
-        .collection("sorteos")
+      const prev = await db.collection("sorteos")
         .where("sorteoPrincipal", "==", true)
         .get();
 
@@ -115,6 +112,7 @@ router.put("/:id", async (req, res) => {
     });
 
     res.json({ success: true });
+
   } catch (error) {
     console.error("❌ Error al editar sorteo:", error);
     res.status(500).json({ error: "Error al editar sorteo" });
