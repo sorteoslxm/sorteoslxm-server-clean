@@ -7,18 +7,13 @@ import { db } from "../config/firebase.js";
 dotenv.config();
 const router = express.Router();
 
-/* ==========================================================
-   🟦 Crear preferencia + guardar compra preliminar
-========================================================== */
 router.post("/crear-preferencia", async (req, res) => {
   try {
     const { titulo, precio, cantidad, sorteoId, telefono, mpCuenta } = req.body;
 
-    // Validaciones básicas
     if (!sorteoId || !precio || !telefono || !cantidad)
       return res.status(400).json({ error: "Faltan datos obligatorios" });
 
-    // Obtener sorteo
     const sorteoDoc = await db.collection("sorteos").doc(sorteoId).get();
     if (!sorteoDoc.exists) return res.status(404).json({ error: "Sorteo no encontrado" });
 
@@ -32,16 +27,11 @@ router.post("/crear-preferencia", async (req, res) => {
 
     console.log("🟢 Token de MercadoPago usado:", mpCuenta, accessToken);
 
-    // ✅ Versión 2.11.0: configurar MercadoPago
-    mercadopago.configure({
-      access_token: accessToken
-    });
+    // ✅ Asignar token directamente (v2.11.0)
+    mercadopago.configurations.access_token = accessToken;
 
-    // Crear preferencia
     const preference = {
-      items: [
-        { title: titulo, unit_price: Number(precio), quantity: Number(cantidad) },
-      ],
+      items: [{ title: titulo, unit_price: Number(precio), quantity: Number(cantidad) }],
       back_urls: {
         success: `https://sorteoslxm.com/pago/exito?sorteo=${sorteoId}`,
         failure: `https://sorteoslxm.com/pago/error?sorteo=${sorteoId}`,
@@ -53,7 +43,6 @@ router.post("/crear-preferencia", async (req, res) => {
 
     const prefResponse = await mercadopago.preferences.create(preference);
 
-    // Guardar compra preliminar en Firestore
     const newCompra = {
       sorteoId,
       telefono,
