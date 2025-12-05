@@ -23,6 +23,7 @@ const allowedOrigins = [
   "https://www.sorteoslxm.com",
   "https://sorteos-2k7mrvg7d-sorteoslxms-projects.vercel.app",
   "https://sorteos-lxm.vercel.app",
+  "https://sorteoslxm-frontend-m1tl7rvr4-sorteoslxms-projects.vercel.app", // ⭐ AGREGADO
   "http://localhost:3000",
   "http://localhost:5173",
 ];

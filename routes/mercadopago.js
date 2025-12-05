@@ -1,80 +1,58 @@
 // FILE: routes/mercadopago.js
 import express from "express";
-import { db } from "../config/firebase.js";
-import dotenv from "dotenv";
+import { MercadoPagoConfig, Preference } from "mercadopago";
 
-import MercadoPagoConfig from "mercadopago";
-import Preference from "mercadopago/dist/clients/preference/index.js";
-
-dotenv.config();
 const router = express.Router();
 
+// ⭐ Cliente MP
+const client = new MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN,
+});
+
+// ⭐ Crear preferencia
 router.post("/crear-preferencia", async (req, res) => {
   try {
-    const { titulo, precio, cantidad, sorteoId, telefono, mpCuenta } = req.body;
+    const { titulo, precio, cantidad, telefono, sorteoId } = req.body;
 
-    if (!sorteoId || !precio || !telefono || !cantidad)
-      return res.status(400).json({ error: "Faltan datos obligatorios" });
-
-    const sorteoDoc = await db.collection("sorteos").doc(sorteoId).get();
-    if (!sorteoDoc.exists)
-      return res.status(404).json({ error: "Sorteo no encontrado" });
-
-    const accessToken =
-      process.env[mpCuenta] ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN_2;
-
-    if (!accessToken)
-      return res.status(500).json({ error: "Token MP no encontrado" });
-
-    console.log("🟢 Token MercadoPago usado:", accessToken);
-
-    // 🔵 SDK CONFIG V2 === CORRECTO
-    const mp = new MercadoPagoConfig({ accessToken });
-    const preference = new Preference(mp);
-
-    // Crear preferencia
-    const prefResponse = await preference.create({
+    const preference = await new Preference(client).create({
       body: {
         items: [
           {
             title: titulo,
-            unit_price: Number(precio),
             quantity: Number(cantidad),
+            unit_price: Number(precio),
           },
         ],
-        metadata: { telefono, sorteoId, cantidad },
         back_urls: {
-          success: `https://sorteoslxm.com/pago/exito?sorteo=${sorteoId}`,
-          failure: `https://sorteoslxm.com/pago/error?sorteo=${sorteoId}`,
-          pending: `https://sorteoslxm.com/pago/pendiente?sorteo=${sorteoId}`,
+          success: "https://sorteoslxm.com/success",
+          failure: "https://sorteoslxm.com/error",
+          pending: "https://sorteoslxm.com/pending",
         },
         auto_return: "approved",
+        metadata: {
+          sorteoId,
+          telefono,
+        },
       },
     });
 
-    // GUARDAR COMPRA PRELIMINAR
-    await db.collection("compras").add({
-      sorteoId,
-      telefono,
-      cantidad,
-      precio,
-      titulo,
-      status: "pending",
-      mpPreferenceId: prefResponse.id,
-      createdAt: Date.now(),
+    console.log("MP Preference creada:", preference);
+
+    res.json({
+      init_point: preference.init_point,
+      preferenceId: preference.id,
     });
 
-    return res.json({
-      ok: true,
-      preferenceId: prefResponse.id,
-      init_point: prefResponse.init_point,
-    });
-  } catch (err) {
-    console.error("❌ ERROR CREAR PREFERENCIA:", err);
-    return res.status(500).json({ error: "Error creando preferencia" });
+  } catch (error) {
+    console.error("❌ ERROR CREAR PREFERENCIA:", error);
+    res.status(500).json({ error: "Error creando preferencia" });
   }
+});
+
+// ⭐ Webhook (opcional)
+router.post("/webhook", (req, res) => {
+  console.log("📩 Webhook recibido:", req.body);
+  res.sendStatus(200);
 });
 
 export default router;
