@@ -8,8 +8,9 @@ import sorteosRoutes from "./routes/sorteos.js";
 import adminRoutes from "./routes/admin.js";
 import bannersRoutes from "./routes/banners.js";
 import comprasRoutes from "./routes/compras.js";
+import chancesRoutes from "./routes/chances.js";        // ⭐ NUEVO
 import webhookRoutes from "./routes/webhook-pago.js";
-import mercadopagoRoutes from "./routes/mercadopago.js"; // <-- nueva ruta
+import mercadopagoRoutes from "./routes/mercadopago.js";
 
 dotenv.config();
 
@@ -30,7 +31,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // permite Postman, mobile apps, etc
+      if (!origin) return callback(null, true); 
       if (allowedOrigins.includes(origin)) return callback(null, true);
 
       console.log("❌ Bloqueado por CORS:", origin);
@@ -40,7 +41,7 @@ app.use(
   })
 );
 
-// Permite JSON en requests
+// Permite JSON
 app.use(express.json());
 
 /* ================================
@@ -52,19 +53,22 @@ app.get("/", (req, res) => res.send("API funcionando OK"));
 // Sorteos
 app.use("/sorteos", sorteosRoutes);
 
-// Admin (login, dashboard)
+// Admin
 app.use("/admin", adminRoutes);
 
 // Banners
 app.use("/banners", bannersRoutes);
 
-// Compra directa desde frontend
+// Compras (creadas desde frontend)
 app.use("/compras", comprasRoutes);
 
-// Webhook MercadoPago
+// ⭐ NUEVO: Chances individuales generadas
+app.use("/chances", chancesRoutes);
+
+// Webhook MercadoPago (acreditaciones)
 app.use("/webhook-pago", webhookRoutes);
 
-// Preferencias MercadoPago (crear orden)
+// Crear preferencia de pago
 app.use("/mercadopago", mercadopagoRoutes);
 
 /* ================================

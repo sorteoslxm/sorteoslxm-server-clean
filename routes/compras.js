@@ -1,109 +1,85 @@
-// FILE: routes/compras.js
+// FILE: web/sorteoslxm-server-clean/routes/compras.js
 import express from "express";
 import { db } from "../config/firebase.js";
-import mercadopago from "mercadopago";
 
 const router = express.Router();
 
-/**
- * POST /compras
- * Crea un documento de compra y genera la preferencia de MercadoPago
- * BODY esperado:
- * {
- *   nombre,
- *   apellido,
- *   email,
- *   telefono,
- *   sorteoId,
- *   cantidad
- * }
- */
+/* 🟦 Obtener todas las compras */
+router.get("/", async (req, res) => {
+  try {
+    const snap = await db
+      .collection("compras")
+      .orderBy("createdAt", "desc")
+      .limit(500)
+      .get();
+    const compras = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    res.json(compras);
+  } catch (err) {
+    console.error("GET /compras ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo compras" });
+  }
+});
 
+/* 🟨 Obtener compras por sorteo */
+router.get("/sorteo/:sorteoId", async (req, res) => {
+  try {
+    const snap = await db
+      .collection("compras")
+      .where("sorteoId", "==", req.params.sorteoId)
+      .orderBy("createdAt", "desc")
+      .get();
+    const compras = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    res.json(compras);
+  } catch (err) {
+    console.error("GET /compras/sorteo ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo compras por sorteo" });
+  }
+});
+
+/* 🟩 Crear compra nueva */
 router.post("/", async (req, res) => {
   try {
-    const { nombre, apellido, email, telefono, sorteoId, cantidad } = req.body;
+    const { sorteoId, telefono, cantidad, precio, mpCuenta, titulo } = req.body;
 
-    if (!sorteoId || !cantidad) {
+    if (!sorteoId || !telefono) {
       return res.status(400).json({ error: "Faltan datos" });
     }
 
-    // obtener sorteo
-    const sorteoRef = db.collection("sorteos").doc(sorteoId);
-    const sorteoSnap = await sorteoRef.get();
+    // Evitar compras duplicadas
+    const dup = await db
+      .collection("compras")
+      .where("telefono", "==", telefono)
+      .where("sorteoId", "==", sorteoId)
+      .where("status", "==", "pending")
+      .limit(1)
+      .get();
 
-    if (!sorteoSnap.exists) {
-      return res.status(404).json({ error: "Sorteo no encontrado" });
+    if (!dup.empty) {
+      return res.json({
+        ok: true,
+        compraId: dup.docs[0].id,
+        yaExistia: true,
+      });
     }
 
-    const sorteo = sorteoSnap.data();
-
-    // precio por chance
-    const precioUnidad = Number(sorteo.precio) || 0;
-    const totalAPagar = precioUnidad * cantidad;
-
-    // Crear documento compra (estado: pending)
-    const compraData = {
-      nombre,
-      apellido,
-      email,
-      telefono,
+    // Crear compra
+    const compraRef = await db.collection("compras").add({
       sorteoId,
-      cantidad,
-      total: totalAPagar,
+      titulo,
+      telefono,
+      cantidad: Number(cantidad) || 1,
+      precio: Number(precio),
       status: "pending",
       createdAt: Date.now(),
-    };
-
-    const compraRef = await db.collection("compras").add(compraData);
-    const compraId = compraRef.id;
-
-    // TOKEN MercadoPago
-    const token =
-      process.env.MERCADOPAGO_ACCESS_TOKEN ||
-      Object.values(process.env).find((k) => k && k.includes("MERCADOPAGO"));
-
-    if (!token) {
-      console.error("No access token");
-      return res.status(500).json({ error: "MP Token faltante" });
-    }
-
-    mercadopago.configure({ access_token: token });
-
-    // Crear preferencia MP
-    const preference = {
-      items: [
-        {
-          title: `Compra de chances (${cantidad}) – ${sorteo.titulo}`,
-          quantity: 1,
-          currency_id: "ARS",
-          unit_price: totalAPagar,
-        },
-      ],
-      back_urls: {
-        success: `${process.env.CLIENT_URL}/pago-exitoso`,
-        pending: `${process.env.CLIENT_URL}/pago-pendiente`,
-        failure: `${process.env.CLIENT_URL}/pago-error`,
-      },
-      auto_return: "approved",
-
-      external_reference: compraId, // muy importante
-    };
-
-    const mpRes = await mercadopago.preferences.create(preference);
-
-    // guardar mpPreferenceId
-    await compraRef.update({
-      mpPreferenceId: mpRes.body.id,
     });
 
     res.json({
       ok: true,
-      init_point: mpRes.body.init_point,
-      compraId,
+      compraId: compraRef.id,
     });
   } catch (err) {
-    console.error("Error en /compras:", err);
-    res.status(500).json({ error: "Error interno" });
+    console.error("POST /compras ERROR:", err);
+    res.status(500).json({ error: "Error creando compra" });
   }
 });
 
