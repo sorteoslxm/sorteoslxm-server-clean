@@ -1,6 +1,6 @@
-// FILE: routes/mercadopago.js
+// FILE: web/sorteoslxm-server-clean/routes/mercadopago.js
 import express from "express";
-import mercadopago from "mercadopago";
+import MercadoPago from "mercadopago"; // Instanciamos con mayúscula
 import dotenv from "dotenv";
 import { db } from "../config/firebase.js";
 
@@ -23,16 +23,21 @@ router.post("/crear-preferencia", async (req, res) => {
 
     const sorteo = sorteoDoc.data();
 
-    // Token según cuenta seleccionada
+    // Elegir token según cuenta
     const accessToken =
       process.env[mpCuenta] ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+      process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
       process.env.MERCADOPAGO_ACCESS_TOKEN_2;
-    mercadopago.configure({ access_token: accessToken });
 
-    /* ======================================================
-       Crear preferencia MP
-    ====================================================== */
+    if (!accessToken)
+      return res.status(500).json({ error: "No se encontró token de MercadoPago" });
+
+    console.log("🟢 Token de MercadoPago usado:", mpCuenta, accessToken);
+
+    // Instanciamos MercadoPago con token
+    const mp = new MercadoPago(accessToken, { sandbox: false });
+
+    // Crear preferencia
     const preference = {
       items: [
         {
@@ -54,11 +59,11 @@ router.post("/crear-preferencia", async (req, res) => {
       },
     };
 
-    const pref = await mercadopago.preferences.create(preference);
+    console.log("📝 Preference MP a crear:", JSON.stringify(preference, null, 2));
 
-    /* ======================================================
-       Guardar compra preliminar (status = pending)
-    ====================================================== */
+    const pref = await mp.preferences.create(preference);
+
+    // Guardar compra preliminar en Firebase
     const newCompra = {
       sorteoId,
       telefono,
@@ -67,8 +72,7 @@ router.post("/crear-preferencia", async (req, res) => {
       titulo,
       status: "pending",
       mpPreferenceId: pref.body.id,
-      mpAccount: mpCuenta || "MERCADOPAGO_ACCESS_TOKEN_1",
-      mpAccount: mpCuenta || "MERCADOPAGO_ACCESS_TOKEN_2",
+      mpAccount: mpCuenta || "default",
       createdAt: Date.now(),
     };
 
