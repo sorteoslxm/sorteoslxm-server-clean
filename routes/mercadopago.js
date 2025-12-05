@@ -1,4 +1,3 @@
-// FILE: routes/mercadopago.js
 import express from "express";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
@@ -9,11 +8,14 @@ const ACCESS_TOKEN =
   process.env.MP_ACCESS_TOKEN ||
   process.env.MERCADOPAGO_ACCESS_TOKEN ||
   process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
+  process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||   // ⬅️⭐ AGREGADO
   process.env.MP_TOKEN ||
   null;
 
 if (!ACCESS_TOKEN) {
   console.error("❌ No se encontró ningún Access Token de MercadoPago en las variables de entorno.");
+} else {
+  console.log("✔️ MercadoPago Access Token detectado.");
 }
 
 // ⭐ Cliente MP
@@ -48,7 +50,7 @@ router.post("/crear-preferencia", async (req, res) => {
       },
     });
 
-    console.log("MP Preference creada:", preference);
+    console.log("✔️ MP Preference creada:", preference.id);
 
     res.json({
       init_point: preference.init_point,
