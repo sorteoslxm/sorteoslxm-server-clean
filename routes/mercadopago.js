@@ -32,10 +32,12 @@ router.post("/crear-preferencia", async (req, res) => {
 
     console.log("🟢 Token de MercadoPago usado:", mpCuenta, accessToken);
 
-    // Configuración correcta v2
-    mercadopago.configurations.setAccessToken(accessToken);
+    // ✅ Versión 2.11.0: configurar MercadoPago
+    mercadopago.configure({
+      access_token: accessToken
+    });
 
-    // Preferencia
+    // Crear preferencia
     const preference = {
       items: [
         { title: titulo, unit_price: Number(precio), quantity: Number(cantidad) },
@@ -51,7 +53,7 @@ router.post("/crear-preferencia", async (req, res) => {
 
     const prefResponse = await mercadopago.preferences.create(preference);
 
-    // Guardar compra preliminar
+    // Guardar compra preliminar en Firestore
     const newCompra = {
       sorteoId,
       telefono,
@@ -71,6 +73,7 @@ router.post("/crear-preferencia", async (req, res) => {
       preferenceId: prefResponse.body.id,
       init_point: prefResponse.body.init_point,
     });
+
   } catch (e) {
     console.error("❌ ERROR CREAR PREFERENCIA:", e);
     return res.status(500).json({ error: "Error creando preferencia" });
