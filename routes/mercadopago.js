@@ -1,6 +1,6 @@
 // FILE: routes/mercadopago.js
 import express from "express";
-import mercadopago from "mercadopago";
+import MercadoPago from "mercadopago";
 import dotenv from "dotenv";
 import { db } from "../config/firebase.js";
 
@@ -14,17 +14,14 @@ router.post("/crear-preferencia", async (req, res) => {
   try {
     const { titulo, precio, cantidad, sorteoId, telefono, mpCuenta } = req.body;
 
-    // Validaciones básicas
     if (!sorteoId || !precio || !telefono || !cantidad)
       return res.status(400).json({ error: "Faltan datos obligatorios" });
 
-    // Obtener sorteo
     const sorteoDoc = await db.collection("sorteos").doc(sorteoId).get();
     if (!sorteoDoc.exists) return res.status(404).json({ error: "Sorteo no encontrado" });
 
     const sorteo = sorteoDoc.data();
 
-    // Seleccionar token según la cuenta
     const accessToken =
       process.env[mpCuenta] ||
       process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
@@ -35,17 +32,12 @@ router.post("/crear-preferencia", async (req, res) => {
 
     console.log("🟢 Token de MercadoPago usado:", mpCuenta, accessToken);
 
-    // Configurar SDK v2
-    mercadopago.configurations.setAccessToken(accessToken);
+    // ⚠️ Configuración correcta para SDK v2
+    MercadoPago.configurations.setAccessToken(accessToken);
 
-    // Crear preferencia
     const preference = {
       items: [
-        {
-          title: titulo,
-          unit_price: Number(precio),
-          quantity: Number(cantidad),
-        },
+        { title: titulo, unit_price: Number(precio), quantity: Number(cantidad) },
       ],
       back_urls: {
         success: `https://sorteoslxm.com/pago/exito?sorteo=${sorteoId}`,
@@ -53,17 +45,12 @@ router.post("/crear-preferencia", async (req, res) => {
         pending: `https://sorteoslxm.com/pago/pendiente?sorteo=${sorteoId}`,
       },
       auto_return: "approved",
-      metadata: {
-        telefono,
-        sorteoId,
-        cantidad,
-      },
+      metadata: { telefono, sorteoId, cantidad },
     };
 
     console.log("📝 Preference MP a crear:", JSON.stringify(preference, null, 2));
 
-    const prefResponse = await mercadopago.preferences.create(preference);
-    const pref = prefResponse.body;
+    const { body: pref } = await MercadoPago.preferences.create({ preference });
 
     // Guardar compra preliminar
     const newCompra = {
@@ -80,11 +67,8 @@ router.post("/crear-preferencia", async (req, res) => {
 
     await db.collection("compras").add(newCompra);
 
-    return res.json({
-      ok: true,
-      preferenceId: pref.id,
-      init_point: pref.init_point,
-    });
+    return res.json({ ok: true, preferenceId: pref.id, init_point: pref.init_point });
+
   } catch (e) {
     console.error("❌ ERROR CREAR PREFERENCIA:", e);
     return res.status(500).json({ error: "Error creando preferencia" });
