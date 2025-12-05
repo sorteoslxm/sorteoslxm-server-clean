@@ -1,13 +1,13 @@
 // FILE: routes/webhook-pago.js
 import express from "express";
-import MercadoPago from "mercadopago";
+import { MercadoPagoConfig, Payment } from "mercadopago";
 import { db } from "../config/firebase.js";
 import { FieldValue } from "firebase-admin/firestore";
 
 const router = express.Router();
 
 // ==========================================================
-//  🔵 WEBHOOK MERCADOPAGO (SDK 2.10+)
+//  🔵 WEBHOOK MERCADOPAGO (SDK 2.11)
 // ==========================================================
 
 router.post("/", async (req, res) => {
@@ -15,56 +15,52 @@ router.post("/", async (req, res) => {
     const body = req.body;
     console.log("📥 Webhook recibido:", JSON.stringify(body, null, 2));
 
+    // ========================================================
+    //  Identificar paymentId
+    // ========================================================
     let paymentId = null;
 
-    // Formato habitual
     if (body.type === "payment" && body.data?.id) {
       paymentId = body.data.id;
     }
-
-    // Formato alternativo
     if (!paymentId && body.id) {
       paymentId = body.id;
     }
-
     if (!paymentId) {
       console.log("⚠ Webhook sin paymentId");
       return res.sendStatus(200);
     }
 
     // ========================================================
-    //  Seleccionar token MP (por defecto usamos el 1 o 2)
+    //  Seleccionar token correcto sin errores
     // ========================================================
-    const token =
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
-      Object.values(process.env).find((v) => v.includes("APP_USR"));
+    const tokens = [
+      process.env.MERCADOPAGO_ACCESS_TOKEN_1,
+      process.env.MERCADOPAGO_ACCESS_TOKEN_2,
+    ].filter(Boolean);
+
+    const token = tokens.length > 1 ? tokens.find(t => t.includes("TEST") || t.includes("APP_USR")) : tokens[0];
 
     if (!token) {
-      console.log("❌ ERROR: token MercadoPago no encontrado");
+      console.log("❌ ERROR: Token MercadoPago NO encontrado");
       return res.sendStatus(500);
     }
 
-    // 👌 SDK V2 (correcto)
-    const mp = new MercadoPago({ accessToken: token });
+    // SDK v2
+    const client = new MercadoPagoConfig({ accessToken: token });
 
     // ========================================================
-    //  Obtener información real del pago
+    //  Obtener datos reales del pago
     // ========================================================
-    const mpPayment = await mp.payment.get({ id: paymentId });
-    const payment = mpPayment || {};
-
-    console.log("💰 Pago encontrado:", paymentId);
+    const payment = await new Payment(client).get({ id: paymentId });
 
     const preferenceId = payment.preference_id;
-    const status = payment.status; // approved / pending / rejected
-    const precioUnit = payment.transaction_details?.total_paid_amount || 0;
+    const status = payment.status;
+    const metadata = payment.metadata || {};
 
-    // Metadata enviada desde la preferencia
-    const md = payment.metadata || {};
-    const sorteoId = md.sorteoId;
-    const telefono = md.telefono;
-    const cantidadComprada = Number(md.cantidad || 1);
+    const sorteoId = metadata.sorteoId;
+    const telefono = metadata.telefono;
+    const cantidad = Number(metadata.cantidad || 1);
 
     if (!sorteoId) {
       console.log("⚠ Webhook sin sorteoId");
@@ -72,7 +68,7 @@ router.post("/", async (req, res) => {
     }
 
     // ========================================================
-    //  Buscar compra existente para evitar duplicados
+    //  Buscar compra existente por preferencia
     // ========================================================
     const snap = await db
       .collection("compras")
@@ -84,43 +80,40 @@ router.post("/", async (req, res) => {
     let compraData;
 
     if (snap.empty) {
-      // Crear compra SOLO si el pago está aprobado
+      // Si no existe compra, crearla sólo si está aprobada
       if (status !== "approved") {
-        console.log("⚠ Pago no aprobado, no se crea compra");
+        console.log("⚠ Pago no aprobado, compra NO creada");
         return res.sendStatus(200);
       }
 
       compraRef = await db.collection("compras").add({
         sorteoId,
         telefono,
-        cantidad: cantidadComprada,
-        precioUnitario: precioUnit,
-        totalPagado: cantidadComprada * precioUnit,
+        cantidad,
         status,
         mpPreferenceId: preferenceId,
         mpPaymentId: paymentId,
-        mpPayer: payment.payer || null,
+        totalPagado: payment.transaction_details.total_paid_amount,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
 
-      compraData = await compraRef.get().then((d) => d.data());
+      compraData = await compraRef.get().then(d => d.data());
 
-      console.log("🟢 Compra creada automáticamente:", compraRef.id);
+      console.log("🟢 Compra creada:", compraRef.id);
+
     } else {
       compraRef = snap.docs[0].ref;
       compraData = snap.docs[0].data();
 
-      // Evitar reprocesar
       if (compraData.status === "approved") {
-        console.log("⏭ Webhook duplicado - pago ya procesado.");
+        console.log("⏭ Webhook duplicado — compra ya procesada");
         return res.sendStatus(200);
       }
 
       await compraRef.update({
         status,
         mpPaymentId: paymentId,
-        mpPayer: payment.payer,
         updatedAt: Date.now(),
       });
 
@@ -128,29 +121,32 @@ router.post("/", async (req, res) => {
     }
 
     // ========================================================
-    //  Sumar chances SOLO si está aprobado
+    //  Generar chances si el pago está aprobado
     // ========================================================
     if (status === "approved") {
       const sorteoRef = db.collection("sorteos").doc(sorteoId);
-      const sorteoSnap = await sorteoRef.get();
-      const sorteo = sorteoSnap.data();
-
-      const chancesMax = Number(sorteo.totalChances || 0);
-      const vendidas = Number(sorteo.chancesVendidas || 0);
-
-      if (chancesMax > 0 && vendidas + cantidadComprada > chancesMax) {
-        console.log("❌ Exceso de chances, compra rechazada");
-        await compraRef.update({ status: "rejected" });
-        return res.sendStatus(200);
-      }
-
       await sorteoRef.update({
-        chancesVendidas: FieldValue.increment(cantidadComprada),
+        chancesVendidas: FieldValue.increment(cantidad),
       });
 
-      console.log(
-        `🏁 Chances sumadas (${cantidadComprada}) al sorteo ${sorteoId}`
-      );
+      // Crear chances
+      const batch = db.batch();
+      const chancesRef = db.collection("chances");
+
+      for (let i = 0; i < cantidad; i++) {
+        const chance = chancesRef.doc();
+        batch.set(chance, {
+          id: chance.id,
+          telefono,
+          sorteoId,
+          numero: Math.floor(Math.random() * 999999),
+          createdAt: Date.now(),
+        });
+      }
+
+      await batch.commit();
+
+      console.log(`🏁 ${cantidad} chances generadas para el sorteo ${sorteoId}`);
     }
 
     return res.sendStatus(200);
