@@ -1,4 +1,3 @@
-// FILE: web/sorteoslxm-server-clean/server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -8,7 +7,7 @@ import sorteosRoutes from "./routes/sorteos.js";
 import adminRoutes from "./routes/admin.js";
 import bannersRoutes from "./routes/banners.js";
 import comprasRoutes from "./routes/compras.js";
-import chancesRoutes from "./routes/chances.js";        // ⭐ NUEVO
+import chancesRoutes from "./routes/chances.js";
 import webhookRoutes from "./routes/webhook-pago.js";
 import mercadopagoRoutes from "./routes/mercadopago.js";
 
@@ -31,7 +30,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true); 
+      if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
 
       console.log("❌ Bloqueado por CORS:", origin);
@@ -45,7 +44,7 @@ app.use(
 app.use(express.json());
 
 /* ================================
-   📌 RUTAS API (SIN /api)
+   📌 RUTAS API
 ================================= */
 
 app.get("/", (req, res) => res.send("API funcionando OK"));
@@ -59,13 +58,13 @@ app.use("/admin", adminRoutes);
 // Banners
 app.use("/banners", bannersRoutes);
 
-// Compras (creadas desde frontend)
+// Compras
 app.use("/compras", comprasRoutes);
 
-// ⭐ NUEVO: Chances individuales generadas
+// Chances individuales
 app.use("/chances", chancesRoutes);
 
-// Webhook MercadoPago (acreditaciones)
+// Webhook MercadoPago
 app.use("/webhook-pago", webhookRoutes);
 
 // Crear preferencia de pago
