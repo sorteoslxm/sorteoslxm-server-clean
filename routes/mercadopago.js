@@ -7,28 +7,35 @@ import { db } from "../config/firebase.js";
 dotenv.config();
 const router = express.Router();
 
+/* ==========================================================
+   🟦 Crear preferencia + guardar compra preliminar
+========================================================== */
 router.post("/crear-preferencia", async (req, res) => {
   try {
     const { titulo, precio, cantidad, sorteoId, telefono, mpCuenta } = req.body;
 
+    // Validaciones básicas
     if (!sorteoId || !precio || !telefono || !cantidad)
       return res.status(400).json({ error: "Faltan datos obligatorios" });
 
+    // Obtener sorteo
     const sorteoDoc = await db.collection("sorteos").doc(sorteoId).get();
     if (!sorteoDoc.exists) return res.status(404).json({ error: "Sorteo no encontrado" });
 
+    // Selección de token según la cuenta
     const accessToken =
       process.env[mpCuenta] ||
       process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
       process.env.MERCADOPAGO_ACCESS_TOKEN_2;
 
-    if (!accessToken) return res.status(500).json({ error: "No se encontró token de MP" });
+    if (!accessToken) return res.status(500).json({ error: "No se encontró token de MercadoPago" });
 
     console.log("🟢 Token de MercadoPago usado:", mpCuenta, accessToken);
 
-    // ✅ Versión 2: setAccessToken
+    // Configuración correcta v2
     mercadopago.configurations.setAccessToken(accessToken);
 
+    // Preferencia
     const preference = {
       items: [
         { title: titulo, unit_price: Number(precio), quantity: Number(cantidad) },
@@ -42,7 +49,7 @@ router.post("/crear-preferencia", async (req, res) => {
       metadata: { telefono, sorteoId, cantidad },
     };
 
-    const pref = await mercadopago.preferences.create(preference);
+    const prefResponse = await mercadopago.preferences.create(preference);
 
     // Guardar compra preliminar
     const newCompra = {
@@ -52,15 +59,18 @@ router.post("/crear-preferencia", async (req, res) => {
       precio,
       titulo,
       status: "pending",
-      mpPreferenceId: pref.body.id,
+      mpPreferenceId: prefResponse.body.id,
       mpAccount: mpCuenta || "default",
       createdAt: Date.now(),
     };
 
     await db.collection("compras").add(newCompra);
 
-    return res.json({ ok: true, preferenceId: pref.body.id, init_point: pref.body.init_point });
-
+    return res.json({
+      ok: true,
+      preferenceId: prefResponse.body.id,
+      init_point: prefResponse.body.init_point,
+    });
   } catch (e) {
     console.error("❌ ERROR CREAR PREFERENCIA:", e);
     return res.status(500).json({ error: "Error creando preferencia" });
