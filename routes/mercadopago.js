@@ -4,9 +4,21 @@ import { MercadoPagoConfig, Preference } from "mercadopago";
 
 const router = express.Router();
 
+// ⭐ Detectar token automáticamente desde cualquier variable
+const ACCESS_TOKEN =
+  process.env.MP_ACCESS_TOKEN ||
+  process.env.MERCADOPAGO_ACCESS_TOKEN ||
+  process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
+  process.env.MP_TOKEN ||
+  null;
+
+if (!ACCESS_TOKEN) {
+  console.error("❌ No se encontró ningún Access Token de MercadoPago en las variables de entorno.");
+}
+
 // ⭐ Cliente MP
 const client = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN,
+  accessToken: ACCESS_TOKEN,
 });
 
 // ⭐ Crear preferencia
