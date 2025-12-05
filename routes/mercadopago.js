@@ -1,6 +1,6 @@
-// FILE: web/sorteoslxm-server-clean/routes/mercadopago.js
+// FILE: routes/mercadopago.js
 import express from "express";
-import MercadoPago from "mercadopago"; // Instanciamos con mayúscula
+import mercadopago from "mercadopago";
 import dotenv from "dotenv";
 import { db } from "../config/firebase.js";
 
@@ -14,8 +14,9 @@ router.post("/crear-preferencia", async (req, res) => {
   try {
     const { titulo, precio, cantidad, sorteoId, telefono, mpCuenta } = req.body;
 
+    // Validaciones básicas
     if (!sorteoId || !precio || !telefono || !cantidad)
-      return res.status(400).json({ error: "Faltan datos" });
+      return res.status(400).json({ error: "Faltan datos obligatorios" });
 
     // Obtener sorteo
     const sorteoDoc = await db.collection("sorteos").doc(sorteoId).get();
@@ -23,7 +24,7 @@ router.post("/crear-preferencia", async (req, res) => {
 
     const sorteo = sorteoDoc.data();
 
-    // Elegir token según cuenta
+    // Seleccionar token según la cuenta
     const accessToken =
       process.env[mpCuenta] ||
       process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
@@ -34,8 +35,8 @@ router.post("/crear-preferencia", async (req, res) => {
 
     console.log("🟢 Token de MercadoPago usado:", mpCuenta, accessToken);
 
-    // Instanciamos MercadoPago con token
-    const mp = new MercadoPago(accessToken, { sandbox: false });
+    // Configurar SDK v2
+    mercadopago.configurations.setAccessToken(accessToken);
 
     // Crear preferencia
     const preference = {
@@ -61,9 +62,10 @@ router.post("/crear-preferencia", async (req, res) => {
 
     console.log("📝 Preference MP a crear:", JSON.stringify(preference, null, 2));
 
-    const pref = await mp.preferences.create(preference);
+    const prefResponse = await mercadopago.preferences.create(preference);
+    const pref = prefResponse.body;
 
-    // Guardar compra preliminar en Firebase
+    // Guardar compra preliminar
     const newCompra = {
       sorteoId,
       telefono,
@@ -71,7 +73,7 @@ router.post("/crear-preferencia", async (req, res) => {
       precio,
       titulo,
       status: "pending",
-      mpPreferenceId: pref.body.id,
+      mpPreferenceId: pref.id,
       mpAccount: mpCuenta || "default",
       createdAt: Date.now(),
     };
@@ -80,10 +82,9 @@ router.post("/crear-preferencia", async (req, res) => {
 
     return res.json({
       ok: true,
-      preferenceId: pref.body.id,
-      init_point: pref.body.init_point,
+      preferenceId: pref.id,
+      init_point: pref.init_point,
     });
-
   } catch (e) {
     console.error("❌ ERROR CREAR PREFERENCIA:", e);
     return res.status(500).json({ error: "Error creando preferencia" });
