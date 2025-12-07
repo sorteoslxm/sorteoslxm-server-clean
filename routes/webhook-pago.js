@@ -7,69 +7,75 @@ import { FieldValue } from "firebase-admin/firestore";
 const router = express.Router();
 
 // ==========================================================
-//  🔵 WEBHOOK MERCADOPAGO (SDK 2.11)
+//  🔵 WEBHOOK MERCADOPAGO – CON LOG DE CUENTA C1 / C2
 // ==========================================================
 
 router.post("/", async (req, res) => {
   try {
     const body = req.body;
+
     console.log("📥 Webhook recibido:", JSON.stringify(body, null, 2));
 
-    // ========================================================
-    //  Identificar paymentId
-    // ========================================================
+    // -----------------------------------------
+    // 1) Obtener paymentId
+    // -----------------------------------------
     let paymentId = null;
+    if (body.type === "payment" && body.data?.id) paymentId = body.data.id;
+    if (!paymentId && body.id) paymentId = body.id;
 
-    if (body.type === "payment" && body.data?.id) {
-      paymentId = body.data.id;
-    }
-    if (!paymentId && body.id) {
-      paymentId = body.id;
-    }
     if (!paymentId) {
       console.log("⚠ Webhook sin paymentId");
       return res.sendStatus(200);
     }
 
-    // ========================================================
-    //  Seleccionar token correcto sin errores
-    // ========================================================
-    const tokens = [
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1,
-      process.env.MERCADOPAGO_ACCESS_TOKEN_2,
-    ].filter(Boolean);
+    // -----------------------------------------
+    // 2) Selección del token C1 o C2
+    // -----------------------------------------
+    let cuentaUsada = "C2";
 
-    const token = tokens.length > 1 ? tokens.find(t => t.includes("TEST") || t.includes("APP_USR")) : tokens[0];
+    const token =
+      process.env.MERCADOPAGO_ACCESS_TOKEN_1 &&
+      Number(paymentId) % 2 === 0
+        ? (cuentaUsada = "C1", process.env.MERCADOPAGO_ACCESS_TOKEN_1)
+        : process.env.MERCADOPAGO_ACCESS_TOKEN_2;
 
     if (!token) {
-      console.log("❌ ERROR: Token MercadoPago NO encontrado");
+      console.log("❌ ERROR: No hay token válido configurado");
       return res.sendStatus(500);
     }
 
-    // SDK v2
+    console.log("💰 PAGO RECIBIDO → CUENTA:", cuentaUsada);
+    console.log("💳 paymentId:", paymentId);
+    console.log("🔑 Token usado:", token.slice(0, 12));
+
     const client = new MercadoPagoConfig({ accessToken: token });
 
-    // ========================================================
-    //  Obtener datos reales del pago
-    // ========================================================
-    const payment = await new Payment(client).get({ id: paymentId });
+    // -----------------------------------------
+    // 3) Obtener pago real
+    // -----------------------------------------
+    const mpPayment = await new Payment(client).get({ id: paymentId });
 
-    const preferenceId = payment.preference_id;
-    const status = payment.status;
-    const metadata = payment.metadata || {};
+    const status = mpPayment.status;
+    const metadata = mpPayment.metadata || {};
+    const preferenceId = mpPayment.preference_id;
 
-    const sorteoId = metadata.sorteoId;
     const telefono = metadata.telefono;
+    const sorteoId = metadata.sorteoId;
     const cantidad = Number(metadata.cantidad || 1);
+
+    console.log("📱 Telefono:", telefono);
+    console.log("🎯 sorteoId:", sorteoId);
+    console.log("🎟 Cantidad:", cantidad);
+    console.log("🔗 preferenceId:", preferenceId);
 
     if (!sorteoId) {
       console.log("⚠ Webhook sin sorteoId");
       return res.sendStatus(200);
     }
 
-    // ========================================================
-    //  Buscar compra existente por preferencia
-    // ========================================================
+    // -----------------------------------------
+    // 4) Buscar compra existente
+    // -----------------------------------------
     const snap = await db
       .collection("compras")
       .where("mpPreferenceId", "==", preferenceId)
@@ -77,40 +83,28 @@ router.post("/", async (req, res) => {
       .get();
 
     let compraRef;
-    let compraData;
 
     if (snap.empty) {
-      // Si no existe compra, crearla sólo si está aprobada
       if (status !== "approved") {
-        console.log("⚠ Pago no aprobado, compra NO creada");
+        console.log("⚠ Pago no aprobado → compra NO creada");
         return res.sendStatus(200);
       }
 
       compraRef = await db.collection("compras").add({
-        sorteoId,
         telefono,
+        sorteoId,
         cantidad,
         status,
         mpPreferenceId: preferenceId,
         mpPaymentId: paymentId,
-        totalPagado: payment.transaction_details.total_paid_amount,
+        totalPagado: mpPayment.transaction_details?.total_paid_amount || 0,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
 
-      compraData = await compraRef.get().then(d => d.data());
-
       console.log("🟢 Compra creada:", compraRef.id);
-
     } else {
       compraRef = snap.docs[0].ref;
-      compraData = snap.docs[0].data();
-
-      if (compraData.status === "approved") {
-        console.log("⏭ Webhook duplicado — compra ya procesada");
-        return res.sendStatus(200);
-      }
-
       await compraRef.update({
         status,
         mpPaymentId: paymentId,
@@ -120,37 +114,41 @@ router.post("/", async (req, res) => {
       console.log("🟡 Compra actualizada:", compraRef.id);
     }
 
-    // ========================================================
-    //  Generar chances si el pago está aprobado
-    // ========================================================
+    // -----------------------------------------
+    // 5) Generar chances
+    // -----------------------------------------
     if (status === "approved") {
-      const sorteoRef = db.collection("sorteos").doc(sorteoId);
-      await sorteoRef.update({
+      // actualizar sorteo
+      await db.collection("sorteos").doc(sorteoId).update({
         chancesVendidas: FieldValue.increment(cantidad),
       });
 
-      // Crear chances
+      // batch
       const batch = db.batch();
-      const chancesRef = db.collection("chances");
+      const chanceCol = db.collection("chances");
 
       for (let i = 0; i < cantidad; i++) {
-        const chance = chancesRef.doc();
-        batch.set(chance, {
-          id: chance.id,
+        const doc = chanceCol.doc();
+
+        const numeroLXM =
+          "LXM-" +
+          String(Math.floor(Math.random() * 999999)).padStart(6, "0");
+
+        batch.set(doc, {
+          id: doc.id,
           telefono,
           sorteoId,
-          numero: Math.floor(Math.random() * 999999),
+          numero: numeroLXM,
           createdAt: Date.now(),
         });
       }
 
       await batch.commit();
 
-      console.log(`🏁 ${cantidad} chances generadas para el sorteo ${sorteoId}`);
+      console.log(`🏁 ${cantidad} chances generadas correctamente`);
     }
 
     return res.sendStatus(200);
-
   } catch (err) {
     console.error("❌ ERROR WEBHOOK:", err);
     return res.sendStatus(500);
