@@ -1,32 +1,39 @@
+// FILE: routes/mercadopago.js
 import express from "express";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
 const router = express.Router();
 
-// ⭐ Detectar token automáticamente desde cualquier variable
-const ACCESS_TOKEN =
-  process.env.MP_ACCESS_TOKEN ||
-  process.env.MERCADOPAGO_ACCESS_TOKEN ||
-  process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-  process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||   // ⬅️⭐ AGREGADO
-  process.env.MP_TOKEN ||
-  null;
+// Cargar ambas cuentas (si están definidas)
+const TOKEN1 = process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+const TOKEN2 = process.env.MERCADOPAGO_ACCESS_TOKEN_2;
 
-if (!ACCESS_TOKEN) {
-  console.error("❌ No se encontró ningún Access Token de MercadoPago en las variables de entorno.");
-} else {
-  console.log("✔️ MercadoPago Access Token detectado.");
+if (!TOKEN1) console.log("⚠ No se encontró MERCADOPAGO_ACCESS_TOKEN_1");
+if (!TOKEN2) console.log("⚠ No se encontró MERCADOPAGO_ACCESS_TOKEN_2");
+
+// Crear clientes separados
+const client1 = TOKEN1 ? new MercadoPagoConfig({ accessToken: TOKEN1 }) : null;
+const client2 = TOKEN2 ? new MercadoPagoConfig({ accessToken: TOKEN2 }) : null;
+
+// Elegir cuenta según el sorteo
+function seleccionarCliente(sorteoId) {
+  if (String(sorteoId).endsWith("A")) return client1;  // ejemplo
+  if (String(sorteoId).endsWith("B")) return client2;  // ejemplo
+
+  // fallback
+  return client1 || client2;
 }
 
-// ⭐ Cliente MP
-const client = new MercadoPagoConfig({
-  accessToken: ACCESS_TOKEN,
-});
-
-// ⭐ Crear preferencia
 router.post("/crear-preferencia", async (req, res) => {
   try {
     const { titulo, precio, cantidad, telefono, sorteoId } = req.body;
+
+    // Seleccionar automáticamente el cliente correcto
+    const client = seleccionarCliente(sorteoId);
+
+    if (!client) {
+      return res.status(500).json({ error: "No hay cliente MP configurado." });
+    }
 
     const preference = await new Preference(client).create({
       body: {
@@ -46,11 +53,12 @@ router.post("/crear-preferencia", async (req, res) => {
         metadata: {
           sorteoId,
           telefono,
+          cantidad
         },
       },
     });
 
-    console.log("✔️ MP Preference creada:", preference.id);
+    console.log("✔ Preferencia creada:", preference.id);
 
     res.json({
       init_point: preference.init_point,
@@ -61,12 +69,6 @@ router.post("/crear-preferencia", async (req, res) => {
     console.error("❌ ERROR CREAR PREFERENCIA:", error);
     res.status(500).json({ error: "Error creando preferencia" });
   }
-});
-
-// ⭐ Webhook (opcional)
-router.post("/webhook", (req, res) => {
-  console.log("📩 Webhook recibido:", req.body);
-  res.sendStatus(200);
 });
 
 export default router;
