@@ -1,73 +1,111 @@
 // FILE: routes/mercadopago.js
 import express from "express";
 import { MercadoPagoConfig, Preference } from "mercadopago";
+import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-// Cargar ambas cuentas (si están definidas)
-const TOKEN1 = process.env.MERCADOPAGO_ACCESS_TOKEN_1;
-const TOKEN2 = process.env.MERCADOPAGO_ACCESS_TOKEN_2;
+/**
+ * Resolución del token según mpCuenta enviada por frontend o por fallback
+ * mpCuenta puede ser: "1", "2", "MERCADOPAGO_ACCESS_TOKEN_1", "MERCADOPAGO_ACCESS_TOKEN_2", o nombre de var.
+ */
+function resolveTokenForAccount(mpCuenta) {
+  if (!mpCuenta) {
+    return (
+      process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
+      process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
+      process.env.MP_ACCESS_TOKEN ||
+      process.env.MERCADOPAGO_ACCESS_TOKEN ||
+      null
+    );
+  }
 
-if (!TOKEN1) console.log("⚠ No se encontró MERCADOPAGO_ACCESS_TOKEN_1");
-if (!TOKEN2) console.log("⚠ No se encontró MERCADOPAGO_ACCESS_TOKEN_2");
+  // Si envían directamente el nombre de la variable de entorno (ej: MERCADOPAGO_ACCESS_TOKEN_2)
+  if (process.env[mpCuenta]) return process.env[mpCuenta];
 
-// Crear clientes separados
-const client1 = TOKEN1 ? new MercadoPagoConfig({ accessToken: TOKEN1 }) : null;
-const client2 = TOKEN2 ? new MercadoPagoConfig({ accessToken: TOKEN2 }) : null;
+  // Si envían "1" o "2"
+  if (mpCuenta === "1") return process.env.MERCADOPAGO_ACCESS_TOKEN_1 || null;
+  if (mpCuenta === "2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2 || null;
 
-// Elegir cuenta según el sorteo
-function seleccionarCliente(sorteoId) {
-  if (String(sorteoId).endsWith("A")) return client1;  // ejemplo
-  if (String(sorteoId).endsWith("B")) return client2;  // ejemplo
+  // Si envían "M1" / "M2"
+  if (mpCuenta.toLowerCase() === "m1") return process.env.MERCADOPAGO_ACCESS_TOKEN_1 || null;
+  if (mpCuenta.toLowerCase() === "m2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2 || null;
 
-  // fallback
-  return client1 || client2;
+  // Fallback general
+  return (
+    process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
+    process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
+    process.env.MP_ACCESS_TOKEN ||
+    null
+  );
 }
 
 router.post("/crear-preferencia", async (req, res) => {
   try {
-    const { titulo, precio, cantidad, telefono, sorteoId } = req.body;
+    const { titulo, precio, cantidad = 1, telefono, sorteoId, mpCuenta } = req.body;
 
-    // Seleccionar automáticamente el cliente correcto
-    const client = seleccionarCliente(sorteoId);
-
-    if (!client) {
-      return res.status(500).json({ error: "No hay cliente MP configurado." });
+    if (!sorteoId || !precio || !telefono) {
+      return res.status(400).json({ error: "Faltan datos obligatorios" });
     }
 
-    const preference = await new Preference(client).create({
-      body: {
-        items: [
-          {
-            title: titulo,
-            quantity: Number(cantidad),
-            unit_price: Number(precio),
-          },
-        ],
-        back_urls: {
-          success: "https://sorteoslxm.com/success",
-          failure: "https://sorteoslxm.com/error",
-          pending: "https://sorteoslxm.com/pending",
+    // resolver token según mpCuenta
+    const token = resolveTokenForAccount(mpCuenta);
+
+    if (!token) {
+      console.error("❌ No hay token MP disponible para crear preferencia");
+      return res.status(500).json({ error: "No se encontró token de MercadoPago" });
+    }
+
+    console.log("🔑 Crear preferencia con token (slice):", token.slice(0, 12), " mpCuenta:", mpCuenta || "fallback");
+
+    const client = new MercadoPagoConfig({ accessToken: token });
+    const preferenceClient = new Preference(client);
+
+    const preferenceBody = {
+      items: [
+        {
+          title: titulo,
+          unit_price: Number(precio),
+          quantity: Number(cantidad),
+          currency_id: "ARS",
         },
-        auto_return: "approved",
-        metadata: {
-          sorteoId,
-          telefono,
-          cantidad
-        },
+      ],
+      back_urls: {
+        success: `https://www.sorteoslxm.com/success`,
+        failure: `https://www.sorteoslxm.com/error`,
+        pending: `https://www.sorteoslxm.com/pending`,
       },
+      auto_return: "approved",
+      metadata: { telefono, sorteoId, cantidad, mpAccount: mpCuenta || null },
+    };
+
+    const prefResponse = await preferenceClient.create({ body: preferenceBody });
+
+    // Guardar compra preliminar en Firestore con mpAccount y mpPreferenceId
+    const compraPre = {
+      sorteoId,
+      telefono,
+      cantidad: Number(cantidad),
+      precio: Number(precio),
+      titulo,
+      status: "pending",
+      mpPreferenceId: prefResponse.id,
+      mpAccount: mpCuenta || (token === process.env.MERCADOPAGO_ACCESS_TOKEN_2 ? "2" : "1"),
+      createdAt: Date.now(),
+    };
+
+    const compraRef = await db.collection("compras").add(compraPre);
+
+    console.log("✔ Compra preliminar guardada:", compraRef.id, "pref:", prefResponse.id);
+
+    return res.json({
+      ok: true,
+      preferenceId: prefResponse.id,
+      init_point: prefResponse.init_point,
     });
-
-    console.log("✔ Preferencia creada:", preference.id);
-
-    res.json({
-      init_point: preference.init_point,
-      preferenceId: preference.id,
-    });
-
-  } catch (error) {
-    console.error("❌ ERROR CREAR PREFERENCIA:", error);
-    res.status(500).json({ error: "Error creando preferencia" });
+  } catch (err) {
+    console.error("❌ ERROR CREAR PREFERENCIA:", err);
+    return res.status(500).json({ error: "Error creando preferencia" });
   }
 });
 
