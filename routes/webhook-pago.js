@@ -44,16 +44,7 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Primero intentamos leer la preferencia id del body (si está) o consultamos la API con un token fallback
-    // Pero lo más fiable: buscar en Firestore la compra preliminar por mpPreferenceId
-    // Podríamos obtener preference_id del payment más tarde, por ahora hacemos un intento con tokens fallback si no encontramos.
-    // Buscar compra preliminar por mpPreferenceId
-    // Como el webhook viene antes que nosotros llamemos la API MP, preferencia_id la podremos tomar del payment (después de obtenerlo).
-
-    // Usar token fallback para obtener payment y su preference_id podría fallar si usamos token incorrecto.
-    // Por eso: intentaremos buscar la compra por preferenceId una vez obtengamos payment.preference_id.
-    // Para obtener payment.preference_id, necesitamos llamar a la API MP; para ello probamos ambos tokens hasta obtener datos válidos.
-
+    // Intentar obtener payment usando ambos tokens
     const possibleTokens = [
       process.env.MERCADOPAGO_ACCESS_TOKEN_1,
       process.env.MERCADOPAGO_ACCESS_TOKEN_2,
@@ -72,80 +63,66 @@ router.post("/", async (req, res) => {
           break;
         }
       } catch (e) {
-        // intentar siguiente token
-        console.log("Intento token fallo (continuamos):", t?.slice(0, 8), e?.message?.slice?.(0,80));
+        console.log("Intento token fallo:", t?.slice(0, 8), e?.message);
       }
     }
 
     if (!payment) {
-      console.error("❌ No se pudo leer el pago con ningun token disponible.");
+      console.error("❌ No se pudo leer el pago con ningún token.");
       return res.sendStatus(500);
     }
 
     const preferenceId = payment.preference_id;
-    const status = payment.status;
-    const metadata = payment.metadata || {};
-    const telefono = metadata.telefono;
-    const sorteoId = metadata.sorteoId;
-    const cantidad = Number(metadata.cantidad || 1);
+    const estado = payment.status;
+    let metadata = payment.metadata || {};
 
-    console.log("🔑 Token usado para leer pago:", usedToken?.slice(0, 12));
-    console.log("🔗 paymentId:", paymentId, "preferenceId:", preferenceId, "status:", status);
+    console.log("🔑 Token usado:", usedToken?.slice(0, 12));
+    console.log("🔗 paymentId:", paymentId, "prefId:", preferenceId, "estado:", estado);
 
-    // Buscar compra preliminar por mpPreferenceId para leer mpAccount guardada
+    // Buscar compra preliminar en Firestore
     const preSnap = await db
       .collection("compras")
       .where("mpPreferenceId", "==", preferenceId)
       .limit(1)
       .get();
 
-    let compraRef;
-    let compraData;
+    let compraRef = null;
+    let compraData = null;
 
     if (!preSnap.empty) {
       compraRef = preSnap.docs[0].ref;
       compraData = preSnap.docs[0].data();
     }
 
-    // Si existe compra preliminar, tentar usar su mpAccount para elegir token (si difiere del usado)
-    if (compraData && compraData.mpAccount) {
-      const tokenFromCompra = resolveTokenByAccountName(compraData.mpAccount);
-      if (tokenFromCompra && tokenFromCompra !== usedToken) {
-        // volver a pedir al API con token correcto
-        try {
-          const client2 = new MercadoPagoConfig({ accessToken: tokenFromCompra });
-          const payment2 = await new Payment(client2).get({ id: paymentId });
-          if (payment2 && payment2.id) {
-            // sobreescribimos payment/usedToken
-            payment = payment2;
-            usedToken = tokenFromCompra;
-          }
-        } catch (e) {
-          console.log("No se pudo leer el pago con tokenFromCompra:", e.message);
-        }
+    // ---- FIX METADATA ----
+    // MercadoPago NO siempre envía metadata en webhook
+    let telefono = metadata.telefono;
+    let sorteoId = metadata.sorteoId;
+    let cantidad = Number(metadata.cantidad || 0);
+
+    if (!telefono || !sorteoId || !cantidad) {
+      if (compraData) {
+        telefono = telefono || compraData.telefono;
+        sorteoId = sorteoId || compraData.sorteoId;
+        cantidad = cantidad || compraData.cantidad || 1;
       }
     }
 
-    // Ahora con payment seguro procesamos
-    const prefId = payment.preference_id;
-    const estado = payment.status; // approved / pending / rejected
-
     if (!sorteoId) {
-      console.log("⚠ Webhook sin sorteoId en metadata");
+      console.log("❌ Webhook sin sorteoId ni en metadata ni en compra preliminar");
       return res.sendStatus(200);
     }
 
-    // Buscar compra existente por mpPreferenceId (si no la encontramos arriba)
+    // Buscar compra existente
     const snap = await db
       .collection("compras")
-      .where("mpPreferenceId", "==", prefId)
+      .where("mpPreferenceId", "==", preferenceId)
       .limit(1)
       .get();
 
     let compraDocRef;
 
     if (snap.empty) {
-      // crear compra solo si está approved
       if (estado !== "approved") {
         console.log("⚠ Pago no aprobado, no se crea compra.");
         return res.sendStatus(200);
@@ -156,7 +133,7 @@ router.post("/", async (req, res) => {
         telefono,
         cantidad,
         status: estado,
-        mpPreferenceId: prefId,
+        mpPreferenceId: preferenceId,
         mpPaymentId: paymentId,
         mpPayer: payment.payer || null,
         totalPagado: payment.transaction_details?.total_paid_amount || 0,
@@ -165,12 +142,12 @@ router.post("/", async (req, res) => {
         updatedAt: Date.now(),
       });
 
-      console.log("🟢 Compra creada automaticamente:", compraDocRef.id);
+      console.log("🟢 Compra creada:", compraDocRef.id);
     } else {
       compraDocRef = snap.docs[0].ref;
-      const compraData2 = snap.docs[0].data();
+      const existing = snap.docs[0].data();
 
-      if (compraData2.status === "approved") {
+      if (existing.status === "approved") {
         console.log("⏭ Compra ya procesada anteriormente");
         return res.sendStatus(200);
       }
@@ -184,7 +161,7 @@ router.post("/", async (req, res) => {
       console.log("🟡 Compra actualizada:", compraDocRef.id);
     }
 
-    // Sumar chances y crearlas si está approved
+    // Generar chances si está aprobado
     if (estado === "approved") {
       const sorteoRef = db.collection("sorteos").doc(sorteoId);
 
@@ -198,6 +175,7 @@ router.post("/", async (req, res) => {
       for (let i = 0; i < cantidad; i++) {
         const doc = chancesRef.doc();
         const numeroLXM = "LXM-" + String(Math.floor(Math.random() * 999999)).padStart(6, "0");
+
         batch.set(doc, {
           id: doc.id,
           telefono,
@@ -213,6 +191,7 @@ router.post("/", async (req, res) => {
     }
 
     return res.sendStatus(200);
+
   } catch (err) {
     console.error("❌ ERROR WEBHOOK:", err);
     return res.sendStatus(500);
