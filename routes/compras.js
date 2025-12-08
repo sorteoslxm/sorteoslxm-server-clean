@@ -1,85 +1,87 @@
-// FILE: web/sorteoslxm-server-clean/routes/compras.js
+// FILE: routes/compras.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* 🟦 Obtener todas las compras */
-router.get("/", async (req, res) => {
+// CALLBACK DE MERCADOPAGO (SUCCESS URL)
+router.get("/callback", async (req, res) => {
   try {
-    const snap = await db
-      .collection("compras")
-      .orderBy("createdAt", "desc")
-      .limit(500)
-      .get();
-    const compras = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    res.json(compras);
-  } catch (err) {
-    console.error("GET /compras ERROR:", err);
-    res.status(500).json({ error: "Error obteniendo compras" });
-  }
-});
+    const {
+      status,
+      collection_status,
+      preference_id,
+      payment_id,
+      merchant_order_id
+    } = req.query;
 
-/* 🟨 Obtener compras por sorteo */
-router.get("/sorteo/:sorteoId", async (req, res) => {
-  try {
-    const snap = await db
-      .collection("compras")
-      .where("sorteoId", "==", req.params.sorteoId)
-      .orderBy("createdAt", "desc")
-      .get();
-    const compras = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    res.json(compras);
-  } catch (err) {
-    console.error("GET /compras/sorteo ERROR:", err);
-    res.status(500).json({ error: "Error obteniendo compras por sorteo" });
-  }
-});
-
-/* 🟩 Crear compra nueva */
-router.post("/", async (req, res) => {
-  try {
-    const { sorteoId, telefono, cantidad, precio, mpCuenta, titulo } = req.body;
-
-    if (!sorteoId || !telefono) {
-      return res.status(400).json({ error: "Faltan datos" });
+    if (status !== "approved" && collection_status !== "approved") {
+      return res.redirect("/error");
     }
 
-    // Evitar compras duplicadas
-    const dup = await db
-      .collection("compras")
-      .where("telefono", "==", telefono)
-      .where("sorteoId", "==", sorteoId)
-      .where("status", "==", "pending")
-      .limit(1)
-      .get();
+    // Buscar preferencia guardada
+    const prefSnap = await db.collection("preferencias").doc(preference_id).get();
+    if (!prefSnap.exists) return res.send("Preferencia no encontrada");
 
-    if (!dup.empty) {
-      return res.json({
-        ok: true,
-        compraId: dup.docs[0].id,
-        yaExistia: true,
+    const pref = prefSnap.data();
+    const { idSorteo, cantidad, nombre, telefono, email } = pref;
+
+    // Buscar sorteo
+    const sorteoRef = db.collection("sorteos").doc(idSorteo);
+    const sorteoSnap = await sorteoRef.get();
+
+    if (!sorteoSnap.exists) return res.send("Sorteo no encontrado");
+
+    const sorteo = sorteoSnap.data();
+
+    // Validaciones
+    if (sorteo.numerosTotales < cantidad) {
+      return res.send("No hay stock suficiente");
+    }
+
+    // Lista donde guardar nuevas chances
+    const chancesGeneradas = [];
+    const offset = sorteo.chancesVendidas?.length || 0;
+
+    for (let i = 0; i < cantidad; i++) {
+      const n = offset + 1 + i;
+      const serial = String(n).padStart(5, "0");
+
+      chancesGeneradas.push({
+        numero: `LXM-${serial}`,
+        comprador: nombre,
+        telefono,
+        email,
+        fecha: new Date().toISOString()
       });
     }
 
-    // Crear compra
-    const compraRef = await db.collection("compras").add({
-      sorteoId,
-      titulo,
-      telefono,
-      cantidad: Number(cantidad) || 1,
-      precio: Number(precio),
-      status: "pending",
-      createdAt: Date.now(),
+    // Actualización del sorteo
+    await sorteoRef.update({
+      numerosTotales: sorteo.numerosTotales - cantidad,
+      chancesVendidas: [...(sorteo.chancesVendidas || []), ...chancesGeneradas]
     });
 
-    res.json({
-      ok: true,
-      compraId: compraRef.id,
+    // Registrar compra
+    await db.collection("compras").add({
+      sorteoId: idSorteo,
+      comprador: nombre,
+      telefono,
+      email,
+      cantidad,
+      payment_id,
+      merchant_order_id,
+      fecha: new Date().toISOString(),
+      estado: "aprobado"
     });
+
+    return res.redirect(
+      `/success?status=approved&payment_id=${payment_id}&sorteo=${idSorteo}`
+    );
+
   } catch (err) {
-    console.error("POST /compras ERROR:", err);
-    res.status(500).json({ error: "Error creando compra" });
+    console.log("❌ Error callback:", err);
+    res.status(500).send("Error interno");
   }
 });
 
