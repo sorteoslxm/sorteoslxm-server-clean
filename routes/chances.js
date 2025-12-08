@@ -1,83 +1,53 @@
-// FILE: routes/chances.js
+// FILE: routes/chances.js  (reemplazar o agregar rutas)
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* ============================================================
-   GET /chances
-   Devuelve TODAS las chances individuales para AdminChances
-============================================================ */
+// GET /chances?limit=200  -> devuelve lista de docs 'chances' ordenadas desc
 router.get("/", async (req, res) => {
-  const limit = parseInt(req.query.limit) || 300;
-
   try {
-    const snapshot = await db
+    const limit = Number(req.query.limit) || 200;
+
+    const snap = await db
       .collection("chances")
       .orderBy("createdAt", "desc")
       .limit(limit)
       .get();
 
-    const chances = snapshot.docs.map((doc) => ({
-      id: doc.id,          // ← ID del documento
-      ...doc.data(),       // ← sorteoId, numero, telefono, titulo, etc.
-    }));
-
-    return res.json(chances);
-  } catch (error) {
-    console.error("❌ Error GET /chances:", error);
-    return res.status(500).json({ error: "Error al obtener chances" });
+    const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    res.json(lista);
+  } catch (err) {
+    console.error("GET /chances ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo chances" });
   }
 });
 
-/* ============================================================
-   GET /chances/resumen
-   Resumen global por sorteo
-============================================================ */
+/* opcional: /chances/resumen -> resumen por sorteo (ya tenías algo parecido) */
 router.get("/resumen", async (req, res) => {
   try {
-    // 1) Obtener todos los sorteos
     const sorteosSnap = await db.collection("sorteos").get();
-    const sorteos = sorteosSnap.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const sorteos = sorteosSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
-    // 2) Obtener todas las compras
     const comprasSnap = await db.collection("compras").get();
-    const compras = comprasSnap.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const compras = comprasSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    // 3) Armar respuesta agrupada por sorteo
     const respuesta = sorteos.map((sorteo) => {
       const comprasDeEste = compras.filter((c) => c.sorteoId === sorteo.id);
-
-      const vendidos = comprasDeEste.reduce(
-        (acc, c) => acc + (c.cantidad || 0),
-        0
-      );
-
+      const vendidos = comprasDeEste.reduce((acc, c) => acc + (c.cantidad || 0), 0);
       return {
         sorteoId: sorteo.id,
         titulo: sorteo.titulo,
         numerosTotales: sorteo.numerosTotales,
         vendidos,
-        restantes: sorteo.numerosTotales - vendidos,
-        compradores: comprasDeEste.map((c) => ({
-          compraId: c.id,
-          telefono: c.telefono,
-          cantidad: c.cantidad,
-          tituloCompra: c.titulo,
-          createdAt: c.createdAt,
-        })),
+        restantes: (sorteo.numerosTotales || 0) - vendidos,
+        compradores: comprasDeEste,
       };
     });
 
     res.json(respuesta);
   } catch (err) {
-    console.error("❌ Error GET /chances/resumen:", err);
+    console.error("GET /chances/resumen ERROR:", err);
     res.status(500).json({ error: "Error interno" });
   }
 });
