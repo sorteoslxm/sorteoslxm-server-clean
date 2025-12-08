@@ -5,12 +5,34 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ============================================================
+   GET /chances
+   Devuelve TODAS las chances individuales para AdminChances
+============================================================ */
+router.get("/", async (req, res) => {
+  const limit = parseInt(req.query.limit) || 300;
+
+  try {
+    const snapshot = await db
+      .collection("chances")
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+
+    const chances = snapshot.docs.map((doc) => ({
+      id: doc.id,          // ← ID del documento
+      ...doc.data(),       // ← sorteoId, numero, telefono, titulo, etc.
+    }));
+
+    return res.json(chances);
+  } catch (error) {
+    console.error("❌ Error GET /chances:", error);
+    return res.status(500).json({ error: "Error al obtener chances" });
+  }
+});
+
+/* ============================================================
    GET /chances/resumen
-   Resumen por sorteo:
-   - total de números
-   - vendidos
-   - restantes
-   - compradores con cantidad
+   Resumen global por sorteo
 ============================================================ */
 router.get("/resumen", async (req, res) => {
   try {
