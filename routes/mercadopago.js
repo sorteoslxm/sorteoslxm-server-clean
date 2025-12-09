@@ -24,6 +24,7 @@ router.post("/crear-preferencia", async (req, res) => {
       return res.status(400).json({ error: "Datos incompletos" });
     }
 
+    // Seleccionar token según la cuenta
     const accessToken = getToken(mpCuenta);
     if (!accessToken) {
       return res.status(500).json({ error: "Falta token MP" });
@@ -32,7 +33,24 @@ router.post("/crear-preferencia", async (req, res) => {
     const mpClient = new MercadoPagoConfig({ accessToken });
     const preferenceClient = new Preference(mpClient);
 
-    // Crear compra preliminar
+    /* ================================
+        OBTENER PRECIO REAL DEL SORTEO
+    ================================= */
+    const sorteoSnap = await db.collection("sorteos").doc(sorteoId).get();
+    if (!sorteoSnap.exists) {
+      return res.status(404).json({ error: "Sorteo no encontrado" });
+    }
+
+    const sorteoData = sorteoSnap.data();
+    const precio = Number(sorteoData.precio);
+
+    if (!precio || precio <= 0) {
+      return res.status(400).json({ error: "Precio inválido en el sorteo" });
+    }
+
+    /* ================================
+        CREAR COMPRA PRELIMINAR
+    ================================= */
     const compraRef = await db.collection("compras").add({
       sorteoId,
       cantidad,
@@ -44,13 +62,16 @@ router.post("/crear-preferencia", async (req, res) => {
 
     const compraId = compraRef.id;
 
+    /* ================================
+        CREAR PREFERENCIA MP
+    ================================= */
     const pref = await preferenceClient.create({
       body: {
         items: [
           {
-            title: `Chances Sorteo ${sorteoId}`,
+            title: `Chances Sorteo ${sorteoData.titulo || sorteoId}`,
             quantity: cantidad,
-            unit_price: 1000,
+            unit_price: precio,
             currency_id: "ARS"
           }
         ],
