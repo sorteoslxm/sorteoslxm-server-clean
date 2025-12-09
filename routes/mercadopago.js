@@ -6,92 +6,84 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ================================
-   🔵 RESOLVER TOKEN SEGÚN CUENTA
+   TOKEN SEGÚN CUENTA
 ================================= */
-function resolveTokenForAccount(mpCuenta) {
-  if (!mpCuenta) {
-    return (
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
-      null
-    );
-  }
-
-  if (process.env[mpCuenta]) return process.env[mpCuenta];
-
-  if (mpCuenta === "1") return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+function getToken(mpCuenta) {
   if (mpCuenta === "2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
-
-  return (
-    process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-    process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
-    null
-  );
+  return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
 }
 
 /* ================================
-   🟦 CREAR PREFERENCIA
+   CREAR PREFERENCIA
 ================================= */
 router.post("/crear-preferencia", async (req, res) => {
   try {
-    const { titulo, precio, cantidad, telefono, sorteoId, mpCuenta } = req.body;
+    const { sorteoId, cantidad, telefono, mpCuenta } = req.body;
 
-    if (!sorteoId || !precio || !telefono) {
-      return res.status(400).json({ error: "Faltan datos obligatorios" });
+    if (!sorteoId || !cantidad) {
+      return res.status(400).json({ error: "Datos incompletos" });
     }
 
-    const token = resolveTokenForAccount(mpCuenta);
-    if (!token) return res.status(500).json({ error: "Token MP no configurado" });
+    const accessToken = getToken(mpCuenta);
+    if (!accessToken) {
+      return res.status(500).json({ error: "Falta token MP" });
+    }
 
-    const client = new MercadoPagoConfig({ accessToken: token });
-    const preferenceClient = new Preference(client);
+    const mpClient = new MercadoPagoConfig({ accessToken });
+    const preferenceClient = new Preference(mpClient);
+
+    // Crear compra preliminar
+    const compraRef = await db.collection("compras").add({
+      sorteoId,
+      cantidad,
+      telefono,
+      mpCuenta: mpCuenta || "1",
+      status: "pendiente",
+      createdAt: new Date()
+    });
+
+    const compraId = compraRef.id;
 
     const pref = await preferenceClient.create({
       body: {
         items: [
           {
-            title: titulo,
-            unit_price: Number(precio),
-            quantity: Number(cantidad),
-            currency_id: "ARS",
-          },
+            title: `Chances Sorteo ${sorteoId}`,
+            quantity: cantidad,
+            unit_price: 1000,
+            currency_id: "ARS"
+          }
         ],
         metadata: {
-          telefono,
           sorteoId,
           cantidad,
-          mpCuenta: mpCuenta || null,
+          telefono,
+          compraId,
+          mpCuenta
         },
         back_urls: {
-          success: "https://www.sorteoslxm.com/success",
-          failure: "https://www.sorteoslxm.com/error",
-          pending: "https://www.sorteoslxm.com/pending",
+          success: "https://sorteoslxm.com/success",
+          failure: "https://sorteoslxm.com/failure",
+          pending: "https://sorteoslxm.com/pending"
         },
         auto_return: "approved",
-        notification_url: "https://sorteoslxm-server-clean.onrender.com/webhook-pago",
-      },
+        notification_url:
+          "https://sorteoslxm-server-clean.onrender.com/webhook-pago"
+      }
     });
 
-    // 🔵 GUARDAR PRECARGA
-    const compraRef = await db.collection("compras").add({
-      sorteoId,
-      telefono,
-      cantidad: Number(cantidad),
-      precio: Number(precio),
-      titulo,
-      status: "pending",
-      mpPreferenceId: pref.id,
-      createdAt: Date.now(),
+    await compraRef.update({
+      mpPreferenceId: pref.id
     });
 
-    return res.json({
+    res.json({
       ok: true,
-      preferenceId: pref.id,
-      init_point: pref.init_point,
+      id: pref.id,
+      init_point: pref.init_point
     });
 
-  } catch (e) {
-    console.error("ERROR PREF:", e);
+  } catch (err) {
+    console.error("❌ ERROR crear preferencia:", err);
     res.status(500).json({ error: "Error creando preferencia" });
   }
 });
