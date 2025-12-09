@@ -1,197 +1,86 @@
 // FILE: routes/webhook-pago.js
 import express from "express";
-import { MercadoPagoConfig, Payment } from "mercadopago";
 import { db } from "../config/firebase.js";
-import { FieldValue } from "firebase-admin/firestore";
 
 const router = express.Router();
 
-function resolveTokenByAccountName(accountName) {
-  if (!accountName) {
-    return (
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-      process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
-      process.env.MP_ACCESS_TOKEN ||
-      null
-    );
-  }
-
-  if (process.env[accountName]) return process.env[accountName];
-  if (accountName === "1") return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
-  if (accountName === "2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
-  if (accountName.toLowerCase() === "m1") return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
-  if (accountName.toLowerCase() === "m2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
-
-  return (
-    process.env.MERCADOPAGO_ACCESS_TOKEN_1 ||
-    process.env.MERCADOPAGO_ACCESS_TOKEN_2 ||
-    process.env.MP_ACCESS_TOKEN ||
-    null
-  );
-}
-
+/* ======================================================
+   🟧 WEBHOOK MERCADOPAGO (SDK nueva)
+====================================================== */
 router.post("/", async (req, res) => {
   try {
-    const body = req.body;
-    console.log("📥 Webhook recibido:", JSON.stringify(body, null, 2));
+    const data = req.body;
 
-    // obtener paymentId
-    let paymentId = null;
-    if (body.type === "payment" && body.data?.id) paymentId = body.data.id;
-    if (!paymentId && body.id) paymentId = body.id;
-    if (!paymentId) {
-      console.log("⚠ Webhook sin paymentId");
-      return res.sendStatus(200);
-    }
+    // ⛔ MercadoPago manda esto cuando se aprueba el pago
+    if (data.type !== "payment") return res.sendStatus(200);
 
-    // Intentar obtener payment usando ambos tokens
-    const possibleTokens = [
-      process.env.MERCADOPAGO_ACCESS_TOKEN_1,
-      process.env.MERCADOPAGO_ACCESS_TOKEN_2,
-    ].filter(Boolean);
+    const paymentId = data.data.id;
+    if (!paymentId) return res.sendStatus(200);
 
-    let payment = null;
-    let usedToken = null;
-
-    for (const t of possibleTokens) {
-      try {
-        const clientTry = new MercadoPagoConfig({ accessToken: t });
-        const mpPaymentTry = await new Payment(clientTry).get({ id: paymentId });
-        if (mpPaymentTry && mpPaymentTry.id) {
-          payment = mpPaymentTry;
-          usedToken = t;
-          break;
-        }
-      } catch (e) {
-        console.log("Intento token fallo:", t?.slice(0, 8), e?.message);
+    // 🔵 Traer info del pago desde MP
+    const response = await fetch(
+      `https://api.mercadopago.com/v1/payments/${paymentId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN_1}`,
+        },
       }
-    }
+    );
+    const pago = await response.json();
 
-    if (!payment) {
-      console.error("❌ No se pudo leer el pago con ningún token.");
-      return res.sendStatus(500);
-    }
+    console.log("🔵 WEBHOOK PAGO:", pago.status, " - ID:", paymentId);
 
-    const preferenceId = payment.preference_id;
-    const estado = payment.status;
-    let metadata = payment.metadata || {};
+    if (pago.status !== "approved") return res.sendStatus(200);
 
-    console.log("🔑 Token usado:", usedToken?.slice(0, 12));
-    console.log("🔗 paymentId:", paymentId, "prefId:", preferenceId, "estado:", estado);
+    const { metadata } = pago;
+    const { sorteoId, cantidad, telefono } = metadata;
 
-    // Buscar compra preliminar en Firestore
-    const preSnap = await db
+    /* ======================================================
+       🟢 1) MARCAR COMPRA COMO APROBADA
+    ====================================================== */
+    const comprasSnap = await db
       .collection("compras")
-      .where("mpPreferenceId", "==", preferenceId)
+      .where("mpPreferenceId", "==", pago.preference_id)
       .limit(1)
       .get();
 
-    let compraRef = null;
-    let compraData = null;
-
-    if (!preSnap.empty) {
-      compraRef = preSnap.docs[0].ref;
-      compraData = preSnap.docs[0].data();
+    if (!comprasSnap.empty) {
+      await comprasSnap.docs[0].ref.update({
+        status: "approved",
+        mpPaymentId: paymentId,
+      });
     }
 
-    // ---- FIX METADATA ----
-    // MercadoPago NO siempre envía metadata en webhook
-    let telefono = metadata.telefono;
-    let sorteoId = metadata.sorteoId;
-    let cantidad = Number(metadata.cantidad || 0);
+    /* ======================================================
+       🟢 2) CREAR CHANCES NUMERADAS
+    ====================================================== */
+    const sorteoRef = db.collection("sorteos").doc(sorteoId);
+    const sorteoDoc = await sorteoRef.get();
 
-    if (!telefono || !sorteoId || !cantidad) {
-      if (compraData) {
-        telefono = telefono || compraData.telefono;
-        sorteoId = sorteoId || compraData.sorteoId;
-        cantidad = cantidad || compraData.cantidad || 1;
-      }
-    }
+    if (!sorteoDoc.exists) return res.sendStatus(200);
 
-    if (!sorteoId) {
-      console.log("❌ Webhook sin sorteoId ni en metadata ni en compra preliminar");
-      return res.sendStatus(200);
-    }
+    const { vendidos = 0 } = sorteoDoc.data();
+    const nuevosVendidos = vendidos + cantidad;
 
-    // Buscar compra existente
-    const snap = await db
-      .collection("compras")
-      .where("mpPreferenceId", "==", preferenceId)
-      .limit(1)
-      .get();
+    // actualizar vendidos
+    await sorteoRef.update({ vendidos: nuevosVendidos });
 
-    let compraDocRef;
+    // crear chances
+    for (let i = 0; i < cantidad; i++) {
+      const numero = (vendidos + i + 1).toString().padStart(5, "0");
 
-    if (snap.empty) {
-      if (estado !== "approved") {
-        console.log("⚠ Pago no aprobado, no se crea compra.");
-        return res.sendStatus(200);
-      }
-
-      compraDocRef = await db.collection("compras").add({
+      await db.collection("chances").add({
         sorteoId,
         telefono,
-        cantidad,
-        status: estado,
-        mpPreferenceId: preferenceId,
-        mpPaymentId: paymentId,
-        mpPayer: payment.payer || null,
-        totalPagado: payment.transaction_details?.total_paid_amount || 0,
-        mpAccount: compraData?.mpAccount || (usedToken === process.env.MERCADOPAGO_ACCESS_TOKEN_2 ? "2" : "1"),
+        numero,
         createdAt: Date.now(),
-        updatedAt: Date.now(),
+        paymentId,
       });
-
-      console.log("🟢 Compra creada:", compraDocRef.id);
-    } else {
-      compraDocRef = snap.docs[0].ref;
-      const existing = snap.docs[0].data();
-
-      if (existing.status === "approved") {
-        console.log("⏭ Compra ya procesada anteriormente");
-        return res.sendStatus(200);
-      }
-
-      await compraDocRef.update({
-        status: estado,
-        mpPaymentId: paymentId,
-        updatedAt: Date.now(),
-      });
-
-      console.log("🟡 Compra actualizada:", compraDocRef.id);
     }
 
-    // Generar chances si está aprobado
-    if (estado === "approved") {
-      const sorteoRef = db.collection("sorteos").doc(sorteoId);
-
-      await sorteoRef.update({
-        chancesVendidas: FieldValue.increment(cantidad),
-      });
-
-      const batch = db.batch();
-      const chancesRef = db.collection("chances");
-
-      for (let i = 0; i < cantidad; i++) {
-        const doc = chancesRef.doc();
-        const numeroLXM = "LXM-" + String(Math.floor(Math.random() * 999999)).padStart(6, "0");
-
-        batch.set(doc, {
-          id: doc.id,
-          telefono,
-          sorteoId,
-          numero: numeroLXM,
-          createdAt: Date.now(),
-        });
-      }
-
-      await batch.commit();
-
-      console.log(`🏁 ${cantidad} chances generadas para sorteo ${sorteoId}`);
-    }
+    console.log("🟢 Chances generadas:", cantidad);
 
     return res.sendStatus(200);
-
   } catch (err) {
     console.error("❌ ERROR WEBHOOK:", err);
     return res.sendStatus(500);
