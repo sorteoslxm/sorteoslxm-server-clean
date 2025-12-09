@@ -4,50 +4,41 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-// CALLBACK DE MERCADOPAGO (SUCCESS URL)
-router.get("/callback", async (req, res) => {
+/* ============================================================
+   ========== 1) CREAR COMPRA Y GUARDAR EN FIREBASE ===========
+   ============================================================ */
+router.post("/crear", async (req, res) => {
   try {
-    const {
-      status,
-      collection_status,
-      preference_id,
-      payment_id,
-      merchant_order_id
-    } = req.query;
+    const { sorteoId, nombre, telefono, email, cantidad } = req.body;
 
-    if (status !== "approved" && collection_status !== "approved") {
-      return res.redirect("/error");
+    if (!sorteoId || !cantidad) {
+      return res.status(400).json({ error: "Datos incompletos" });
     }
 
-    // Buscar preferencia guardada
-    const prefSnap = await db.collection("preferencias").doc(preference_id).get();
-    if (!prefSnap.exists) return res.send("Preferencia no encontrada");
-
-    const pref = prefSnap.data();
-    const { idSorteo, cantidad, nombre, telefono, email } = pref;
-
-    // Buscar sorteo
-    const sorteoRef = db.collection("sorteos").doc(idSorteo);
+    // Obtener sorteo
+    const sorteoRef = db.collection("sorteos").doc(sorteoId);
     const sorteoSnap = await sorteoRef.get();
 
-    if (!sorteoSnap.exists) return res.send("Sorteo no encontrado");
+    if (!sorteoSnap.exists) {
+      return res.status(404).json({ error: "Sorteo no encontrado" });
+    }
 
     const sorteo = sorteoSnap.data();
 
-    // Validaciones
-    if (sorteo.numerosTotales < cantidad) {
-      return res.send("No hay stock suficiente");
+    // Validar stock
+    if ((sorteo.chancesVendidas?.length || 0) + cantidad > sorteo.numerosTotales) {
+      return res.status(400).json({ error: "No hay suficientes chances disponibles" });
     }
 
-    // Lista donde guardar nuevas chances
-    const chancesGeneradas = [];
+    // Generar chances
     const offset = sorteo.chancesVendidas?.length || 0;
+    const nuevasChances = [];
 
     for (let i = 0; i < cantidad; i++) {
-      const n = offset + 1 + i;
-      const serial = String(n).padStart(5, "0");
+      const numero = offset + 1 + i;
+      const serial = String(numero).padStart(5, "0");
 
-      chancesGeneradas.push({
+      nuevasChances.push({
         numero: `LXM-${serial}`,
         comprador: nombre,
         telefono,
@@ -56,29 +47,40 @@ router.get("/callback", async (req, res) => {
       });
     }
 
-    // Actualización del sorteo
+    // Actualizar sorteo
     await sorteoRef.update({
-      numerosTotales: sorteo.numerosTotales - cantidad,
-      chancesVendidas: [...(sorteo.chancesVendidas || []), ...chancesGeneradas]
+      chancesVendidas: [...(sorteo.chancesVendidas || []), ...nuevasChances]
     });
 
-    // Registrar compra
+    // Guardar compra
     await db.collection("compras").add({
-      sorteoId: idSorteo,
-      comprador: nombre,
+      sorteoId,
+      nombre,
       telefono,
       email,
       cantidad,
-      payment_id,
-      merchant_order_id,
-      fecha: new Date().toISOString(),
-      estado: "aprobado"
+      chances: nuevasChances,
+      fecha: new Date().toISOString()
     });
 
-    return res.redirect(
-      `/success?status=approved&payment_id=${payment_id}&sorteo=${idSorteo}`
-    );
+    res.json({
+      ok: true,
+      mensaje: "Compra registrada correctamente",
+      chances: nuevasChances
+    });
 
+  } catch (err) {
+    console.error("❌ POST /compras/crear ERROR:", err);
+    res.status(500).json({ error: "Error interno" });
+  }
+});
+
+/* ============================================================
+   ========== 2) CALLBACK DE MERCADOPAGO (OPCIONAL) ============
+   ============================================================ */
+router.get("/callback", async (req, res) => {
+  try {
+    return res.redirect("/success");
   } catch (err) {
     console.log("❌ Error callback:", err);
     res.status(500).send("Error interno");
