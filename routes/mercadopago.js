@@ -11,7 +11,7 @@ const router = express.Router();
 function getToken(mpCuenta) {
   return mpCuenta === "2"
     ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
-    : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+    : process.env.MERCADAPAGO_ACCESS_TOKEN_1;
 }
 
 /* ===========================================================
@@ -27,12 +27,13 @@ router.post("/crear-preferencia", async (req, res) => {
     const sorteo = snap.data();
     const mpCuenta = String(sorteo.mpCuenta || "1");
     const token = getToken(mpCuenta);
-    if (!token) return res.status(500).json({ error: "MERCADOPAGO_ACCESS_TOKEN no configurado" });
 
-    // Configurar SDK con el token correcto
-    mercadopago.configurations.setAccessToken(token);
+    if (!token) return res.status(500).json({ error: "TOKEN de MercadoPago no configurado" });
 
-    // Crear pre-registro de compra
+    // CONFIGURAR SDK
+    mercadopago.configure({ access_token: token });
+
+    // Crear pre-registro
     const compraRef = await db.collection("compras").add({
       sorteoId,
       cantidad,
@@ -41,13 +42,14 @@ router.post("/crear-preferencia", async (req, res) => {
       status: "pendiente",
       createdAt: new Date(),
     });
+
     const compraId = compraRef.id;
 
     // Crear preferencia
-    const preferenceData = {
+    const preference = await mercadopago.preferences.create({
       items: [
         {
-          title: `Chances Sorteo ${sorteo.titulo || "Sorteo"}`,
+          title: `Chances Sorteo ${sorteo.titulo}`,
           quantity: Number(cantidad),
           unit_price: Number(sorteo.precio),
           currency_id: "ARS",
@@ -61,21 +63,19 @@ router.post("/crear-preferencia", async (req, res) => {
       },
       auto_return: "approved",
       notification_url: "https://sorteoslxm-server-clean.onrender.com/mercadopago/webhook",
-    };
+    });
 
-    const preference = await mercadopago.preferences.create(preferenceData);
+    await compraRef.update({ mpPreferenceId: preference.response.id });
 
-    await compraRef.update({ mpPreferenceId: preference.body.id });
-
-    return res.json({
+    res.json({
       ok: true,
-      id: preference.body.id,
-      init_point: preference.body.init_point,
+      id: preference.response.id,
+      init_point: preference.response.init_point,
     });
 
   } catch (err) {
     console.error("❌ ERROR crear preferencia:", err);
-    return res.status(500).json({ error: "Error al crear la preferencia" });
+    res.status(500).json({ error: "Error al crear la preferencia" });
   }
 });
 
@@ -89,27 +89,24 @@ router.post("/webhook", async (req, res) => {
 
     const mpCuenta = req.body?.data?.metadata?.mpCuenta || "1";
     const token = getToken(mpCuenta);
-    if (!token) return res.sendStatus(500);
 
-    mercadopago.configurations.setAccessToken(token);
+    mercadopago.configure({ access_token: token });
 
-    const paymentResponse = await mercadopago.payment.get(paymentId);
-    const payment = paymentResponse.response;
+    const { response: payment } = await mercadopago.payment.get(paymentId);
 
     if (payment.status === "approved") {
       const compraId = payment.metadata?.compraId;
+
       if (compraId) {
         await db.collection("compras").doc(compraId).update({
           status: "pagado",
           paymentData: payment,
           updatedAt: new Date(),
         });
-        console.log("✔ Pago confirmado:", compraId);
       }
     }
 
     res.sendStatus(200);
-
   } catch (err) {
     console.error("❌ ERROR WEBHOOK:", err);
     res.sendStatus(500);
