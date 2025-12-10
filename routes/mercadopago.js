@@ -1,6 +1,6 @@
 // FILE: routes/mercadopago.js
 import express from "express";
-import Mercadopago from "@mercadopago/sdk-node";
+import mercadopago from "mercadopago";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
@@ -29,7 +29,8 @@ router.post("/crear-preferencia", async (req, res) => {
     const token = getToken(mpCuenta);
     if (!token) return res.status(500).json({ error: "MERCADOPAGO_ACCESS_TOKEN no configurado" });
 
-    const mp = new Mercadopago({ accessToken: token });
+    // Configurar SDK con el token correcto
+    mercadopago.configurations.setAccessToken(token);
 
     // Crear pre-registro de compra
     const compraRef = await db.collection("compras").add({
@@ -43,7 +44,7 @@ router.post("/crear-preferencia", async (req, res) => {
     const compraId = compraRef.id;
 
     // Crear preferencia
-    const preference = await mp.preferences.create({
+    const preferenceData = {
       items: [
         {
           title: `Chances Sorteo ${sorteo.titulo || "Sorteo"}`,
@@ -59,12 +60,14 @@ router.post("/crear-preferencia", async (req, res) => {
         pending: "https://sorteoslxm.com/pending",
       },
       auto_return: "approved",
-      notification_url: "https://sorteoslxm-server-clean.onrender.com/webhook-pago",
-    });
+      notification_url: "https://sorteoslxm-server-clean.onrender.com/mercadopago/webhook",
+    };
+
+    const preference = await mercadopago.preferences.create(preferenceData);
 
     await compraRef.update({ mpPreferenceId: preference.body.id });
 
-    res.json({
+    return res.json({
       ok: true,
       id: preference.body.id,
       init_point: preference.body.init_point,
@@ -88,9 +91,10 @@ router.post("/webhook", async (req, res) => {
     const token = getToken(mpCuenta);
     if (!token) return res.sendStatus(500);
 
-    const mp = new Mercadopago({ accessToken: token });
-    const paymentResponse = await mp.payment.get({ id: paymentId });
-    const payment = paymentResponse.body;
+    mercadopago.configurations.setAccessToken(token);
+
+    const paymentResponse = await mercadopago.payment.get(paymentId);
+    const payment = paymentResponse.response;
 
     if (payment.status === "approved") {
       const compraId = payment.metadata?.compraId;
