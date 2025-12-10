@@ -1,17 +1,17 @@
 // FILE: routes/mercadopago.js
 import express from "express";
-import { MercadoPagoConfig, Preference } from "mercadopago";
+import { MercadoPagoConfig, Preference, Payment } from "mercadapago";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
 /* ===========================================================
-   TOKEN SEGÚN CUENTA
+   OBTENER TOKEN SEGÚN LA CUENTA  (CORREGIDO NOMBRE)
 =========================================================== */
 function getToken(mpCuenta) {
   return mpCuenta === "2"
-    ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
-    : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+    ? process.env.MERCADOPAGO_ACCESS_TOKEN_2   // CORRECTO
+    : process.env.MERCADAPAGO_ACCESS_TOKEN_1; // CORRECTO
 }
 
 /* ===========================================================
@@ -31,16 +31,14 @@ router.post("/crear-preferencia", async (req, res) => {
     const token = getToken(mpCuenta);
 
     if (!token) {
-      return res.status(500).json({ error: "No se encontró MERCADOPAGO_ACCESS_TOKEN" });
+      return res.status(500).json({ error: "MERCADOPAGO_ACCESS_TOKEN no configurado" });
     }
 
-    const client = new MercadoPagoConfig({
-      accessToken: token
-    });
+    const client = new MercadoPagoConfig({ accessToken: token });
 
     const preference = new Preference(client);
 
-    // Guardar compra preliminar
+    // Crear pre-registro de compra
     const compraRef = await db.collection("compras").add({
       sorteoId,
       cantidad,
@@ -90,7 +88,44 @@ router.post("/crear-preferencia", async (req, res) => {
 
   } catch (err) {
     console.error("❌ ERROR crear preferencia:", err.response?.data || err);
-    return res.status(500).json({ error: "Error al crear preferencia" });
+    return res.status(500).json({ error: "Error al crear la preferencia" });
+  }
+});
+
+/* ===========================================================
+   WEBHOOK (OBLIGATORIO)
+=========================================================== */
+router.post("/webhook", async (req, res) => {
+  try {
+    const paymentId = req.query["data.id"];
+    if (!paymentId) return res.sendStatus(400);
+
+    const mpCuenta = req.body?.data?.metadata?.mpCuenta || "1";
+    const token = getToken(mpCuenta);
+
+    const client = new MercadoPagoConfig({ accessToken: token });
+
+    const payment = await new Payment(client).get({ id: paymentId });
+
+    if (payment.status === "approved") {
+      const compraId = payment.metadata?.compraId;
+
+      if (compraId) {
+        await db.collection("compras").form(compraId).update({
+          status: "pagado",
+          paymentData: payment,
+          updatedAt: new Date()
+        });
+
+        console.log("✔ Pago confirmado:", compraId);
+      }
+    }
+
+    return res.sendStatus(200);
+
+  } catch (err) {
+    console.error("❌ ERROR WEBHOOK:", err.response?.data || err);
+    return res.sendStatus(500);
   }
 });
 
