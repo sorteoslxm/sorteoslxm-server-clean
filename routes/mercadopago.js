@@ -1,6 +1,6 @@
 // FILE: routes/mercadopago.js
 import express from "express";
-import { MercadoPagoConfig, Preference } from "mercadapopago";
+import { MercadoPagoConfig, Preference } from "mercadopago";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
