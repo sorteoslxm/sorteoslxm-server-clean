@@ -1,20 +1,13 @@
-// FILE: routes/chances.js  (reemplazar o agregar rutas)
+// FILE: routes/chances.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-// GET /chances?limit=200  -> devuelve lista de docs 'chances' ordenadas desc
 router.get("/", async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 200;
-
-    const snap = await db
-      .collection("chances")
-      .orderBy("createdAt", "desc")
-      .limit(limit)
-      .get();
-
+    const snap = await db.collection("chances").orderBy("createdAt", "desc").limit(limit).get();
     const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     res.json(lista);
   } catch (err) {
@@ -23,7 +16,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* opcional: /chances/resumen -> resumen por sorteo (ya tenías algo parecido) */
 router.get("/resumen", async (req, res) => {
   try {
     const sorteosSnap = await db.collection("sorteos").get();

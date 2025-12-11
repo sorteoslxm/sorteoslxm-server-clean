@@ -4,21 +4,11 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* ============================================================
-   0) LISTAR TODAS LAS COMPRAS  (ADMIN)
-   ============================================================ */
+/* Listar compras (admin) */
 router.get("/", async (req, res) => {
   try {
-    const snap = await db
-      .collection("compras")
-      .orderBy("createdAt", "desc")
-      .get();
-
-    const lista = snap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    }));
-
+    const snap = await db.collection("compras").orderBy("createdAt", "desc").get();
+    const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     res.json(lista);
   } catch (err) {
     console.error("GET /compras ERROR:", err);
@@ -26,22 +16,12 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* ============================================================
-   1) CREAR COMPRA PRELIMINAR (ANTES DE PAGAR)
-   ============================================================ */
+/* Crear compra preliminar (si quieres usar este endpoint desde frontend en lugar del que crea preferencia) */
 router.post("/crear", async (req, res) => {
   try {
-    const { 
-      sorteoId, 
-      telefono, 
-      nombre, 
-      email, 
-      cantidad, 
-      mpPreferenceId, 
-      mpAccount 
-    } = req.body;
+    const { sorteoId, telefono, nombre, email, cantidad, mpPreferenceId, mpAccount } = req.body;
 
-    if (!sorteoId || !telefono || !cantidad || !mpPreferenceId) {
+    if (!sorteoId || !telefono || !cantidad) {
       return res.status(400).json({ error: "Faltan datos requeridos" });
     }
 
@@ -51,31 +31,17 @@ router.post("/crear", async (req, res) => {
       nombre: nombre || null,
       email: email || null,
       cantidad: Number(cantidad || 1),
-      mpPreferenceId,
+      mpPreferenceId: mpPreferenceId || null,
       mpAccount: mpAccount || null,
       status: "pending",
-      createdAt: Date.now(),
-      updatedAt: Date.now()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     });
-
-    console.log("🟦 Compra preliminar creada:", compraRef.id);
 
     res.json({ ok: true, compraId: compraRef.id });
   } catch (err) {
-    console.error("❌ ERROR POST /compras/crear:", err);
+    console.error("POST /compras/crear ERROR:", err);
     res.status(500).json({ error: "Error interno" });
-  }
-});
-
-/* ============================================================
-   2) CALLBACK DE MP (NO SE USA)
-   ============================================================ */
-router.get("/callback", async (req, res) => {
-  try {
-    return res.redirect("/success");
-  } catch (err) {
-    console.log("❌ Error callback:", err);
-    res.status(500).send("Error interno");
   }
 });
 

@@ -6,58 +6,50 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ============================================================
-   TOKEN DE CADA CUENTA
+   Mapear token según mpCuenta (acepta "1"/"2" o el nombre env)
 ============================================================ */
 function getToken(mpCuenta) {
-  return mpCuenta === "2"
-    ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
-    : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+  if (!mpCuenta) return null;
+
+  if (mpCuenta === "2" || mpCuenta === "MERCADOPAGO_ACCESS_TOKEN_2")
+    return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
+  return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
 }
 
 /* ============================================================
-   LEE UN PAYMENT USANDO EL TOKEN CORRECTO
+   Leer payment por id usando axios y token
 ============================================================ */
-async function leerPayment(paymentId, mpCuenta) {
+async function leerPayment(paymentId, token) {
   try {
-    const token = getToken(mpCuenta);
-
-    const { data } = await axios.get(
-      `https://api.mercadopago.com/v1/payments/${paymentId}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
+    const { data } = await axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     return data;
-  } catch (err) {
-    console.error("❌ Error leerPayment:", err.response?.data || err);
+  } catch (e) {
+    // devuelve null si no pudo
     return null;
   }
 }
 
 /* ============================================================
-   LEE UNA MERCHANT ORDER Y BUSCA PAGOS APROBADOS
+   Leer merchant_order y devolver payment aprobado id
+   (usa resource URL que Mercadolibre envía)
 ============================================================ */
-async function leerMerchantOrder(resource, mpCuenta) {
+async function leerMerchantOrder(resourceUrl, token) {
   try {
-    const token = getToken(mpCuenta);
-
-    const { data } = await axios.get(resource, {
+    const { data } = await axios.get(resourceUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
 
-    const pagoAprobado = data.payments?.find(
-      (p) => p.status === "approved"
-    );
-
+    const pagoAprobado = data.payments?.find((p) => p.status === "approved");
     return pagoAprobado ? pagoAprobado.id : null;
-
-  } catch (err) {
-    console.error("❌ Error leerMerchantOrder:", err.response?.data || err);
+  } catch (e) {
     return null;
   }
 }
 
 /* ============================================================
-   WEBHOOK OFICIAL
+   Endpoint webhook: recibe both payment y merchant_order
 ============================================================ */
 router.post("/", async (req, res) => {
   console.log("📥 Webhook recibido:", JSON.stringify(req.body, null, 2));
@@ -65,19 +57,20 @@ router.post("/", async (req, res) => {
   try {
     let paymentId = null;
 
-    /* -------------------------------------------------------
-       🔵 Caso 1: type = "payment"
-    --------------------------------------------------------*/
+    // 1) Si vino directo tipo "payment"
     if (req.body.type === "payment" && req.body.data?.id) {
       paymentId = req.body.data.id;
     }
 
-    /* -------------------------------------------------------
-       🟧 Caso 2: merchant_order (necesita buscar payment adentro)
-    --------------------------------------------------------*/
-    if (!paymentId && req.body.topic === "merchant_order") {
-      const from1 = await leerMerchantOrder(req.body.resource, "1");
-      const from2 = await leerMerchantOrder(req.body.resource, "2");
+    // 2) Si vino merchant_order (resource url)
+    if (!paymentId && req.body.topic === "merchant_order" && req.body.resource) {
+      // intentamos con ambas cuentas: MP1 y MP2
+      const t1 = process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+      const t2 = process.env.MERCADOPAGO_ACCESS_TOKEN_2;
+
+      const from1 = await leerMerchantOrder(req.body.resource, t1);
+      const from2 = await leerMerchantOrder(req.body.resource, t2);
+
       paymentId = from1 || from2;
     }
 
@@ -86,75 +79,87 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    /* -------------------------------------------------------
-       🔥 LEER PAYMENT REAL USANDO MP1 Y MP2
-    --------------------------------------------------------*/
-    const pago1 = await leerPayment(paymentId, "1");
-    const pago2 = await leerPayment(paymentId, "2");
-    const payment = pago1 || pago2;
+    // 3) Intentar leer el payment con ambos tokens (para obtener metadata, status)
+    const t1 = process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+    const t2 = process.env.MERCADOPAGO_ACCESS_TOKEN_2;
+
+    const p1 = await leerPayment(paymentId, t1);
+    const p2 = await leerPayment(paymentId, t2);
+    const payment = p1 || p2;
 
     if (!payment) {
-      console.log("❌ No se pudo leer payment");
+      console.log("❌ No se pudo leer payment:", paymentId);
       return res.sendStatus(200);
     }
 
+    // 4) metadata
     const meta = payment.metadata || {};
-
     if (!meta.sorteoId || !meta.compraId || !meta.cantidad) {
-      console.log("⚠ metadata incompleta → ignorado");
+      console.log("⚠ metadata incompleta → ignorado", meta);
       return res.sendStatus(200);
     }
 
-    console.log("🔍 payment metadata:", meta);
+    const sorteoId = meta.sorteoId;
+    const compraId = meta.compraId;
+    const cantidad = Number(meta.cantidad || 1);
+    const telefono = meta.telefono || null;
+    const mpCuenta = meta.mpCuenta || "1";
 
-    /* -------------------------------------------------------
-       🔥 1) MARCAR COMPRA COMO PAGADA
-    --------------------------------------------------------*/
-    await db.collection("compras").doc(meta.compraId).update({
-      status: "pagado",
-      paymentId,
-      mpCuenta: meta.mpCuenta || "1",
-      updatedAt: new Date().toISOString(),
-    });
+    // 5) Si aprobado → marcar compra y generar chances
+    if (payment.status === "approved") {
+      // marcar compra
+      try {
+        await db.collection("compras").doc(compraId).update({
+          status: "pagado",
+          paymentId,
+          mpCuenta,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error("⚠ No se pudo actualizar compra:", e);
+      }
 
-    /* -------------------------------------------------------
-       🔥 2) GENERAR CHANCES
-    --------------------------------------------------------*/
-    const sorteoRef = db.collection("sorteos").doc(meta.sorteoId);
-    const sorteoSnap = await sorteoRef.get();
-    const sorteo = sorteoSnap.data();
+      // generar objects de chances y guardarlos tanto en collection 'chances' como dentro del sorteo
+      const sorteoRef = db.collection("sorteos").doc(sorteoId);
+      const sorteoSnap = await sorteoRef.get();
+      const sorteoData = sorteoSnap.exists ? sorteoSnap.data() : null;
+      const base = sorteoData?.chancesVendidas?.length || 0;
 
-    const base = sorteo.chancesVendidas?.length || 0;
-    const nuevas = [];
+      const nuevas = [];
+      for (let i = 0; i < cantidad; i++) {
+        const n = base + i + 1;
+        const numero = `LXM-${String(n).padStart(5, "0")}`;
+        const chanceObj = {
+          sorteoId,
+          numero,
+          telefono,
+          mpStatus: "approved",
+          mpPaymentId: paymentId,
+          createdAt: new Date().toISOString(),
+        };
 
-    for (let i = 0; i < meta.cantidad; i++) {
-      const n = base + i + 1;
-      const numero = `LXM-${String(n).padStart(5, "0")}`;
+        // guardar global
+        await db.collection("chances").add(chanceObj);
+        nuevas.push(chanceObj);
+      }
 
-      const chanceObj = {
-        sorteoId: meta.sorteoId,
-        numero,
-        telefono: meta.telefono,
-        mpStatus: "approved",
-        mpPaymentId: paymentId,
-        createdAt: new Date().toISOString(),
-      };
+      // actualizar sorteo.chancesVendidas (mantener compatibilidad)
+      try {
+        await sorteoRef.update({
+          chancesVendidas: [...(sorteoData?.chancesVendidas || []), ...nuevas],
+          chancesOcupadas: (sorteoData?.chancesOcupadas || 0) + nuevas.length,
+          editedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.error("⚠ No se pudo actualizar sorteo con nuevas chances:", e);
+      }
 
-      nuevas.push(chanceObj);
-
-      // 🔥 Guardar GLOBAL
-      await db.collection("chances").add(chanceObj);
+      console.log("🎉 Chances generadas:", nuevas.length);
+    } else {
+      console.log("ℹ Pago no aprobado (status):", payment.status);
     }
-
-    // 🔥 Guardar también dentro del sorteo (compatibilidad)
-    await sorteoRef.update({
-      chancesVendidas: [...(sorteo.chancesVendidas || []), ...nuevas],
-    });
-
-    console.log("🎉 Chances generadas:", nuevas.length);
 
     return res.sendStatus(200);
-
   } catch (err) {
     console.error("❌ ERROR WEBHOOK:", err);
     return res.sendStatus(200);
