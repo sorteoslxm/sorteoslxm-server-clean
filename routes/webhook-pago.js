@@ -1,4 +1,4 @@
-// FILE: /web/sorteoslxm-server-clean/routes/webhook-pago.js
+// FILE: routes/webhook-pago.js
 import express from "express";
 import axios from "axios";
 import { db } from "../config/firebase.js";
@@ -20,10 +20,12 @@ function getToken(mpCuenta) {
 async function leerPayment(paymentId, mpCuenta) {
   try {
     const token = getToken(mpCuenta);
+
     const { data } = await axios.get(
       `https://api.mercadopago.com/v1/payments/${paymentId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
+
     return data;
   } catch (err) {
     console.error("❌ Error leerPayment:", err.response?.data || err);
@@ -62,7 +64,6 @@ router.post("/", async (req, res) => {
 
   try {
     let paymentId = null;
-    let mpCuenta = null;
 
     /* -------------------------------------------------------
        🔵 Caso 1: type = "payment"
@@ -72,7 +73,7 @@ router.post("/", async (req, res) => {
     }
 
     /* -------------------------------------------------------
-       🟧 Caso 2: merchant_order
+       🟧 Caso 2: merchant_order (necesita buscar payment adentro)
     --------------------------------------------------------*/
     if (!paymentId && req.body.topic === "merchant_order") {
       const from1 = await leerMerchantOrder(req.body.resource, "1");
@@ -88,9 +89,9 @@ router.post("/", async (req, res) => {
     /* -------------------------------------------------------
        🔥 LEER PAYMENT REAL USANDO MP1 Y MP2
     --------------------------------------------------------*/
-    const p1 = await leerPayment(paymentId, "1");
-    const p2 = await leerPayment(paymentId, "2");
-    const payment = p1 || p2;
+    const pago1 = await leerPayment(paymentId, "1");
+    const pago2 = await leerPayment(paymentId, "2");
+    const payment = pago1 || pago2;
 
     if (!payment) {
       console.log("❌ No se pudo leer payment");
@@ -99,12 +100,10 @@ router.post("/", async (req, res) => {
 
     const meta = payment.metadata || {};
 
-    if (!meta.sorteoId || !meta.compraId) {
+    if (!meta.sorteoId || !meta.compraId || !meta.cantidad) {
       console.log("⚠ metadata incompleta → ignorado");
       return res.sendStatus(200);
     }
-
-    mpCuenta = meta.mpCuenta || "1";
 
     console.log("🔍 payment metadata:", meta);
 
@@ -114,8 +113,8 @@ router.post("/", async (req, res) => {
     await db.collection("compras").doc(meta.compraId).update({
       status: "pagado",
       paymentId,
-      mpCuenta,
-      updatedAt: new Date()
+      mpCuenta: meta.mpCuenta || "1",
+      updatedAt: new Date().toISOString(),
     });
 
     /* -------------------------------------------------------
@@ -130,15 +129,26 @@ router.post("/", async (req, res) => {
 
     for (let i = 0; i < meta.cantidad; i++) {
       const n = base + i + 1;
-      nuevas.push({
-        numero: `LXM-${String(n).padStart(5, "0")}`,
+      const numero = `LXM-${String(n).padStart(5, "0")}`;
+
+      const chanceObj = {
+        sorteoId: meta.sorteoId,
+        numero,
         telefono: meta.telefono,
-        fecha: new Date().toISOString()
-      });
+        mpStatus: "approved",
+        mpPaymentId: paymentId,
+        createdAt: new Date().toISOString(),
+      };
+
+      nuevas.push(chanceObj);
+
+      // 🔥 Guardar GLOBAL
+      await db.collection("chances").add(chanceObj);
     }
 
+    // 🔥 Guardar también dentro del sorteo (compatibilidad)
     await sorteoRef.update({
-      chancesVendidas: [...(sorteo.chancesVendidas || []), ...nuevas]
+      chancesVendidas: [...(sorteo.chancesVendidas || []), ...nuevas],
     });
 
     console.log("🎉 Chances generadas:", nuevas.length);

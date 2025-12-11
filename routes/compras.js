@@ -5,17 +5,46 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ============================================================
+   0) LISTAR TODAS LAS COMPRAS  (ADMIN)
+   ============================================================ */
+router.get("/", async (req, res) => {
+  try {
+    const snap = await db
+      .collection("compras")
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const lista = snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
+
+    res.json(lista);
+  } catch (err) {
+    console.error("GET /compras ERROR:", err);
+    res.status(500).json({ error: "Error obteniendo compras" });
+  }
+});
+
+/* ============================================================
    1) CREAR COMPRA PRELIMINAR (ANTES DE PAGAR)
    ============================================================ */
 router.post("/crear", async (req, res) => {
   try {
-    const { sorteoId, telefono, nombre, email, cantidad, mpPreferenceId, mpAccount } = req.body;
+    const { 
+      sorteoId, 
+      telefono, 
+      nombre, 
+      email, 
+      cantidad, 
+      mpPreferenceId, 
+      mpAccount 
+    } = req.body;
 
     if (!sorteoId || !telefono || !cantidad || !mpPreferenceId) {
       return res.status(400).json({ error: "Faltan datos requeridos" });
     }
 
-    // Guardar compra preliminar (antes de pagar)
     const compraRef = await db.collection("compras").add({
       sorteoId,
       telefono,
@@ -39,7 +68,7 @@ router.post("/crear", async (req, res) => {
 });
 
 /* ============================================================
-   2) CALLBACK DE MERCADOPAGO (NO SE USA PERO SE DEJA)
+   2) CALLBACK DE MP (NO SE USA)
    ============================================================ */
 router.get("/callback", async (req, res) => {
   try {

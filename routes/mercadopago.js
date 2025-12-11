@@ -1,90 +1,164 @@
 // FILE: routes/mercadopago.js
 import express from "express";
-import { MercadoPagoConfig, Preference } from "mercadopago";
 import { db } from "../config/firebase.js";
+import mercadopago from "mercadopago";
 
 const router = express.Router();
 
-/* ===========================================================
-   TOKEN SEGÚN LA CUENTA
-=========================================================== */
-function getToken(mpCuenta) {
-  return mpCuenta === "2"
-    ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
-    : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+/*
+  Función para obtener el access_token correcto según el sorteo
+*/
+async function getTokenBySorteo(sorteoId) {
+  const snap = await db.collection("sorteos").doc(sorteoId).get();
+  if (!snap.exists) return null;
+
+  const data = snap.data();
+  return data.mpCuenta || null;
 }
 
-/* ===========================================================
-   CREAR PREFERENCIA
-=========================================================== */
+/*
+  CREAR PREFERENCIA
+--------------------------------------------------*/
 router.post("/crear-preferencia", async (req, res) => {
   try {
-    const { sorteoId, cantidad, telefono } = req.body;
+    const { sorteoId, titulo, precio, emailComprador } = req.body;
 
-    const snap = await db.collection("sorteos").doc(sorteoId).get();
-    if (!snap.exists)
-      return res.status(404).json({ error: "Sorteo no encontrado" });
+    // 🔥 tomar access_token según sorteo
+    const access_token = await getTokenBySorteo(sorteoId);
 
-    const sorteo = snap.data();
-    const mpCuenta = String(sorteo.mpCuenta || "1");
+    if (!access_token) {
+      return res.status(400).json({ error: "El sorteo no tiene cuenta MP configurada" });
+    }
 
-    const token = getToken(mpCuenta);
-    if (!token) return res.status(500).json({ error: "Token MP no configurado" });
+    // configurar SDK con ese token
+    mercadopago.configure({ access_token });
 
-    // SDK v2
-    const client = new MercadoPagoConfig({
-      accessToken: token,
-    });
-
-    const preference = new Preference(client);
-
-    // Crear registro compra
-    const compraRef = await db.collection("compras").add({
-      sorteoId,
-      cantidad,
-      telefono,
-      mpCuenta,
-      status: "pendiente",
-      createdAt: new Date(),
-    });
-
-    const compraId = compraRef.id;
-
-    // Crear preferencia
-    const response = await preference.create({
-      body: {
-        items: [
-          {
-            title: `Chances Sorteo ${sorteo.titulo}`,
-            quantity: Number(cantidad),
-            unit_price: Number(sorteo.precio),
-          },
-        ],
-        metadata: { sorteoId, compraId, cantidad, telefono, mpCuenta },
-        back_urls: {
-          success: "https://sorteoslxm.com/success",
-          failure: "https://sorteoslxm.com/failure",
-          pending: "https://sorteoslxm.com/pending",
+    const preference = {
+      items: [
+        {
+          id: sorteoId,
+          title: titulo,
+          quantity: 1,
+          unit_price: Number(precio),
         },
-        auto_return: "approved",
-
-        // 🔥🔥🔥 CORREGIDO AQUÍ 🔥🔥🔥
-        notification_url:
-          "https://sorteoslxm-server-clean.onrender.com/webhook-pago",
+      ],
+      metadata: {
+        sorteoId,
+        emailComprador,
       },
-    });
+      back_urls: {
+        success: "https://sorteoslxm.com/success",
+        failure: "https://sorteoslxm.com/error",
+        pending: "https://sorteoslxm.com/pending",
+      },
+      auto_return: "approved",
+      notification_url: "https://sorteoslxm-server-clean.onrender.com/webhook-pago",
+    };
 
-    // Guardar preferenceId
-    await compraRef.update({ mpPreferenceId: response.id });
+    const result = await mercadopago.preferences.create(preference);
 
-    res.json({
+    return res.json({
       ok: true,
-      id: response.id,
-      init_point: response.init_point,
+      init_point: result.body.init_point,
+      id: result.body.id,
     });
-  } catch (err) {
-    console.error("❌ ERROR crear preferencia:", err);
-    res.status(500).json({ error: "Error creando preferencia" });
+
+  } catch (error) {
+    console.error("❌ ERROR crear preferencia:", error);
+    return res.status(500).json({ error: "Error creando preferencia" });
+  }
+});
+
+/*
+  WEBHOOK
+--------------------------------------------------*/
+router.post("/webhook-pago", async (req, res) => {
+  try {
+    console.log("📥 Webhook recibido:", req.body);
+
+    let paymentId = null;
+
+    // topic=payment
+    if (req.body.data?.id) {
+      paymentId = req.body.data.id;
+    }
+
+    // topic=merchant_order
+    if (req.body.resource && req.body.resource.includes("/merchant_orders/")) {
+      const parts = req.body.resource.split("/");
+      paymentId = parts[parts.length - 1];
+    }
+
+    if (!paymentId) {
+      console.log("⚠ No se pudo obtener paymentId → ignorado");
+      return res.sendStatus(200);
+    }
+
+    /*
+      1️⃣ OBTENER METADATA DESDE LA API DE PAYMENT
+      PERO usando EL TOKEN CORRECTO según sorteo.
+    */
+
+    // primero obtener el pago con token base (solo para leer metadata)
+    mercadopago.configure({ access_token: process.env.MP_FALLBACK_TOKEN });
+
+    let pagoInfo = null;
+
+    try {
+      const resp = await mercadopago.payment.get(paymentId);
+      pagoInfo = resp.body;
+    } catch (err) {
+      console.log("❌ No se pudo leer pago:", err);
+      return res.sendStatus(200);
+    }
+
+    const sorteoId = pagoInfo.metadata?.sorteoId;
+
+    if (!sorteoId) {
+      console.log("⚠ metadata incompleta → ignorado");
+      return res.sendStatus(200);
+    }
+
+    // ahora sí → obtener access token del sorteo
+    const access_token = await getTokenBySorteo(sorteoId);
+    if (!access_token) {
+      console.log("❌ sorteo sin access_token → ignorado");
+      return res.sendStatus(200);
+    }
+
+    // reconfigurar SDK con token correcto
+    mercadopago.configure({ access_token });
+
+    /*
+      2️⃣ LEER PAGO CON TOKEN CORRECTO (para evitar caller_collector_mismatch)
+    */
+    let pagoFinal;
+    try {
+      pagoFinal = (await mercadopago.payment.get(paymentId)).body;
+    } catch (err) {
+      console.log("❌ error leyendo pago con token correcto:", err);
+      return res.sendStatus(200);
+    }
+
+    const estado = pagoFinal.status;
+
+    /*
+      3️⃣ SI ESTÁ APROBADO → MARCAR NÚMERO COMPRADO
+    */
+    if (estado === "approved") {
+      console.log("💰 Pago aprobado para sorteo", sorteoId);
+
+      await db.collection("sorteos").doc(sorteoId).update({
+        chancesOcupadas: (pagoFinal.transaction_details?.total_paid_amount || 1),
+        editedAt: new Date().toISOString(),
+      });
+    }
+
+    return res.sendStatus(200);
+
+  } catch (error) {
+    console.error("❌ ERROR webhook:", error);
+    return res.sendStatus(500);
   }
 });
 
