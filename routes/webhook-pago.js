@@ -38,11 +38,27 @@ router.post("/", async (req, res) => {
     const paymentId = data?.id || resource;
     if (!paymentId) return res.sendStatus(200);
 
-    // --- 1) Consultar el pago SIN TOKEN (solo para leer metadata preliminar)
-    // MP igual devuelve metadata en webhooks v2 en body.data.metadata
+    // --- 0) Anti-duplicado ---
+    const lockRef = db.collection("mpLocks").doc(paymentId.toString());
+    const lockSnap = await lockRef.get();
+
+    if (lockSnap.exists) {
+      console.log("⚠ Webhook DUPLICADO ignorado:", paymentId);
+      return res.sendStatus(200);
+    }
+
+    // Crear lock
+    await lockRef.set({
+      paymentId,
+      processedAt: new Date(),
+    });
+
+    // --- 1) Metadata preliminar
     const prelimMeta = body?.data?.metadata || {};
 
-    const mpCuenta = prelimMeta.mpCuenta || prelimMeta.mp_cuenta || "1";
+    const mpCuenta =
+      prelimMeta.mpCuenta || prelimMeta.mp_cuenta || "1";
+
     const token = getToken(mpCuenta);
 
     if (!token) {
@@ -56,7 +72,7 @@ router.post("/", async (req, res) => {
     });
     const paymentClient = new Payment(client);
 
-    // --- 3) Consultar el pago real (AHORA SÍ con token)
+    // --- 3) Consultar el pago real (con metadata correcta)
     const payment = await paymentClient.get({ id: paymentId });
     const meta = payment?.metadata || {};
 
@@ -70,7 +86,7 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // --- 4) Buscar compra
+    // --- 4) Buscar compra ---
     const compraRef = db.collection("compras").doc(compraId);
     const snap = await compraRef.get();
 
@@ -82,7 +98,7 @@ router.post("/", async (req, res) => {
     const compra = snap.data();
     const chancesRef = db.collection("chances");
 
-    // --- 5) Crear chances
+    // --- 5) Crear chances ---
     for (let i = 0; i < cantidad; i++) {
       await chancesRef.add({
         sorteoId,
@@ -94,7 +110,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // --- 6) Marcar compra como pagada
+    // --- 6) Marcar compra como pagada ---
     await compraRef.update({
       status: "pagado",
       updatedAt: new Date().toISOString(),
