@@ -5,90 +5,106 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-// NECESARIO para recibir RAW body
+// Webhook requiere RAW para MP
 router.use(express.raw({ type: "*/*" }));
 
-// Inicializar SDK CORRECTO
-const mpClient = new MercadoPagoConfig({
-  accessToken: process.env.MP_ACCESS_TOKEN,
-});
-const payment = new Payment(mpClient);
+// Obtener token según mpCuenta (misma lógica que crear-preferencia)
+function getToken(mpCuenta) {
+  if (!mpCuenta) return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+
+  if (mpCuenta.startsWith("MERCADOPAGO_ACCESS_TOKEN_")) {
+    return process.env[mpCuenta] || null;
+  }
+
+  if (mpCuenta === "2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
+
+  return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+}
 
 router.post("/", async (req, res) => {
   try {
-    // Convertir buffer a JSON
-    const jsonString = req.body.toString("utf8");
-    const body = JSON.parse(jsonString);
+    // Convertir RAW a JSON
+    const body = JSON.parse(req.body.toString("utf8"));
+    console.log("📥 Webhook:", JSON.stringify(body, null, 2));
 
-    console.log("📥 Webhook decodificado:", JSON.stringify(body, null, 2));
+    const { topic, type, data, resource } = body;
 
-    const paymentId =
-      body?.data?.id ||
-      body?.resource || 
-      null;
-
-    if (!paymentId) {
-      console.log("⚠ No llegó paymentId");
+    // Solo aceptar notificaciones de pago
+    if (topic !== "payment" && type !== "payment") {
       return res.sendStatus(200);
     }
 
-    // Traer datos del pago con el SDK NUEVO
-    const pago = await payment.get({ id: paymentId });
+    // Obtener ID del pago
+    const paymentId = data?.id || resource;
+    if (!paymentId) return res.sendStatus(200);
 
-    if (!pago) {
-      console.log("⚠ Pago no encontrado en MP");
+    // --- 1) Consultar el pago SIN TOKEN (solo para leer metadata preliminar)
+    // MP igual devuelve metadata en webhooks v2 en body.data.metadata
+    const prelimMeta = body?.data?.metadata || {};
+
+    const mpCuenta = prelimMeta.mpCuenta || prelimMeta.mp_cuenta || "1";
+    const token = getToken(mpCuenta);
+
+    if (!token) {
+      console.log("❌ No hay access token para cuenta:", mpCuenta);
       return res.sendStatus(200);
     }
 
-    const meta = pago.metadata || {};
+    // --- 2) Inicializar SDK con el token correcto
+    const client = new MercadoPagoConfig({
+      accessToken: token,
+    });
+    const paymentClient = new Payment(client);
 
-    console.log("📌 Metadata recibida:", meta);
+    // --- 3) Consultar el pago real (AHORA SÍ con token)
+    const payment = await paymentClient.get({ id: paymentId });
+    const meta = payment?.metadata || {};
 
     const sorteoId = meta.sorteoId || meta.sorteo_id;
     const compraId = meta.compraId || meta.compra_id;
     const cantidad = Number(meta.cantidad || 1);
-    const telefono = meta.telefono || null;
-    const mpCuenta = meta.mpCuenta || "1";
-    const estadoMP = pago.status; // approved / pending / rejected
+    const telefono = meta.telefono || meta.tel || null;
 
     if (!sorteoId || !compraId) {
-      console.log("⚠ Metadata incompleta, no se crean chances");
+      console.log("⚠ Metadata incompleta:", meta);
       return res.sendStatus(200);
     }
 
-    // Buscar compra
+    // --- 4) Buscar compra
     const compraRef = db.collection("compras").doc(compraId);
-    const compraSnap = await compraRef.get();
+    const snap = await compraRef.get();
 
-    if (!compraSnap.exists) {
-      console.log("⚠ Compra no existe:", compraId);
+    if (!snap.exists) {
+      console.log("⚠ Compra no encontrada:", compraId);
       return res.sendStatus(200);
     }
 
-    const compraData = compraSnap.data();
-
-    // Crear chances
+    const compra = snap.data();
     const chancesRef = db.collection("chances");
 
+    // --- 5) Crear chances
     for (let i = 0; i < cantidad; i++) {
       await chancesRef.add({
         sorteoId,
         compraId,
-        usuario: compraData.usuario || null,
+        usuario: compra.usuario || null,
         telefono,
-        createdAt: new Date(),
-        mpStatus: estadoMP,
-        mpPaymentId: paymentId,
-        numero: null, // si usás números asignados
+        fecha: new Date(),
         mpCuenta,
       });
     }
 
-    console.log(`✅ ${cantidad} chances creadas para sorteo ${sorteoId}`);
-    return res.sendStatus(200);
+    // --- 6) Marcar compra como pagada
+    await compraRef.update({
+      status: "pagado",
+      updatedAt: new Date().toISOString(),
+    });
 
-  } catch (error) {
-    console.error("❌ ERROR WEBHOOK:", error);
+    console.log(`✅ ${cantidad} chances generadas para sorteo ${sorteoId}`);
+
+    return res.sendStatus(200);
+  } catch (e) {
+    console.error("❌ ERROR WEBHOOK:", e);
     return res.sendStatus(500);
   }
 });
