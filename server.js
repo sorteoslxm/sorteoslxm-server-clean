@@ -23,7 +23,7 @@ const allowedOrigins = [
   "https://www.sorteoslxm.com",
   "https://sorteos-2k7mrvg7d-sorteoslxms-projects.vercel.app",
   "https://sorteos-lxm.vercel.app",
-  "https://sorteoslxm-frontend-m1tl7rvr4-sorteoslxms-projects.vercel.app", // ⭐ AGREGADO
+  "https://sorteoslxm-frontend-m1tl7rvr4-sorteoslxms-projects.vercel.app",
   "http://localhost:3000",
   "http://localhost:5173",
 ];
@@ -41,34 +41,29 @@ app.use(
   })
 );
 
-// Permite JSON
+/* ==========================================
+   ⚠️  WEBHOOK — debe recibir RAW BODY
+========================================== */
+app.use(
+  "/webhook-pago",
+  express.raw({ type: "application/json" }),
+  webhookRoutes
+);
+
+/* ==========================================
+   📌 RESTO DE LA API — usa JSON
+========================================== */
 app.use(express.json());
 
-/* ================================
-   📌 RUTAS API
-================================= */
-
+// Rutas visibles
 app.get("/", (req, res) => res.send("API funcionando OK"));
 
-// Sorteos
+// Rutas API
 app.use("/sorteos", sorteosRoutes);
-
-// Admin
 app.use("/admin", adminRoutes);
-
-// Banners
 app.use("/banners", bannersRoutes);
-
-// Compras
 app.use("/compras", comprasRoutes);
-
-// Chances individuales
 app.use("/chances", chancesRoutes);
-
-// Webhook MercadoPago
-app.use("/webhook-pago", webhookRoutes);
-
-// Crear preferencia de pago
 app.use("/mercadopago", mercadopagoRoutes);
 
 /* ================================
