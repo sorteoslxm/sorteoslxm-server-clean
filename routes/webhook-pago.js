@@ -7,20 +7,6 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-// MP requiere RAW body, lo convertimos manualmente
-router.use(express.raw({ type: "application/json" }));
-
-router.use((req, res, next) => {
-  try {
-    if (req.body && Buffer.isBuffer(req.body)) {
-      req.body = JSON.parse(req.body.toString());
-    }
-  } catch (err) {
-    console.log("❌ Error RAW → JSON:", err);
-  }
-  next();
-});
-
 router.post("/", async (req, res) => {
   try {
     const { type, data } = req.body;
@@ -29,8 +15,8 @@ router.post("/", async (req, res) => {
 
     if (type !== "payment") return res.sendStatus(200);
 
-    // info del pago desde MP
-    const payment = await mercadopago.payment.findById(data.id);
+    // Buscar el pago correctamente con SDK NUEVO
+    const payment = await mercadopago.payment.get(data.id);
     const meta = payment.body.metadata || {};
 
     const sorteoId = meta.sorteoId || meta.sorteo_id;
