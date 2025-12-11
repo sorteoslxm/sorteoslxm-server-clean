@@ -1,22 +1,38 @@
 // FILE: routes/webhook-pago.js
-// WEBHOOK MERCADOPAGO – COMPATIBLE 100%
-
 import express from "express";
 import mercadopago from "mercadopago";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
+// NECESARIO para recibir RAW body de MercadoPago
+router.use(express.raw({ type: "*/*" }));
+
 router.post("/", async (req, res) => {
   try {
-    const { type, data } = req.body;
+    // Convertir buffer a JSON
+    const jsonString = req.body.toString("utf8");
+    const body = JSON.parse(jsonString);
 
-    console.log("📥 Webhook recibido:", JSON.stringify(req.body, null, 2));
+    console.log("📥 Webhook decodificado:", JSON.stringify(body, null, 2));
 
-    if (type !== "payment") return res.sendStatus(200);
+    const { type, data, topic } = body;
 
-    // Buscar el pago correctamente con SDK NUEVO
-    const payment = await mercadopago.payment.get(data.id);
+    // Webhook tipo "payment"
+    if (type !== "payment" && topic !== "payment") {
+      return res.sendStatus(200);
+    }
+
+    // Obtener ID real del pago
+    const paymentId = data?.id || body.resource;
+
+    if (!paymentId) {
+      console.log("⚠ No se encontró paymentId");
+      return res.sendStatus(200);
+    }
+
+    // Get pago con el SDK actual
+    const payment = await mercadopago.payment.get(paymentId);
     const meta = payment.body.metadata || {};
 
     const sorteoId = meta.sorteoId || meta.sorteo_id;
@@ -25,15 +41,13 @@ router.post("/", async (req, res) => {
     const telefono = meta.telefono || meta.tel || null;
     const mpCuenta = meta.mpCuenta || meta.mp_cuenta || "1";
 
-    if (!sorteoId || !compraId || !cantidad) {
-      console.log("⚠ metadata incompleta → ignorado", meta);
+    if (!sorteoId || !compraId) {
+      console.log("⚠ Metadata incompleta:", meta);
       return res.sendStatus(200);
     }
 
-    // generar chances
-    const chancesRef = db.collection("chances");
+    // Buscar compra
     const compraRef = db.collection("compras").doc(compraId);
-
     const compraSnap = await compraRef.get();
     if (!compraSnap.exists) {
       console.log("⚠ compra no encontrada:", compraId);
@@ -41,7 +55,9 @@ router.post("/", async (req, res) => {
     }
 
     const compra = compraSnap.data();
+    const chancesRef = db.collection("chances");
 
+    // Crear chances
     for (let i = 0; i < cantidad; i++) {
       await chancesRef.add({
         sorteoId,
@@ -54,7 +70,6 @@ router.post("/", async (req, res) => {
     }
 
     console.log(`✅ ${cantidad} chances generadas para sorteo ${sorteoId}`);
-
     return res.sendStatus(200);
 
   } catch (e) {

@@ -42,16 +42,16 @@ app.use(
 );
 
 /* ==========================================
-   ⚠️  WEBHOOK — debe recibir RAW BODY
+   ⚠️ WEBHOOK — DEBE RECIBIR RAW BODY
 ========================================== */
 app.use(
   "/webhook-pago",
-  express.raw({ type: "application/json" }),
+  express.raw({ type: "*/*" }), // ← importantísimo
   webhookRoutes
 );
 
 /* ==========================================
-   📌 RESTO DE LA API — usa JSON
+   📌 RESTO DE LA API — usa JSON normal
 ========================================== */
 app.use(express.json());
 
