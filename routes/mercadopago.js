@@ -1,127 +1,113 @@
 // FILE: routes/mercadopago.js
 import express from "express";
+import MercadoPagoConfig, { Preference } from "mercadopago";
 import { db } from "../config/firebase.js";
-import { MercadoPagoConfig, Preference, Payment } from "mercadopago";
 
 const router = express.Router();
 
-/*
-  Obtener access_token según sorteo
-*/
-async function getTokenBySorteo(sorteoId) {
-  const snap = await db.collection("sorteos").doc(sorteoId).get();
-  if (!snap.exists) return null;
-  return snap.data().mpCuenta || null;
+// Tokens de cuentas
+const MP_TOKENS = {
+  MERCADOPAGO_ACCESS_TOKEN_1: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
+  MERCADOPAGO_ACCESS_TOKEN_2: process.env.MERCADOPAGO_ACCESS_TOKEN_2,
+  default: process.env.MP_FALLBACK_TOKEN,
+};
+
+// 👉 Crear cliente según mpCuenta
+function getMPClient(mpCuenta) {
+  const token = MP_TOKENS[mpCuenta] || MP_TOKENS.default;
+  return new MercadoPagoConfig({ accessToken: token });
 }
 
-/*
-  CREAR PREFERENCIA
---------------------------------------------------*/
+/* ------------------------------------------------------- */
+/*                CREAR PREFERENCIA DE PAGO                 */
+/* ------------------------------------------------------- */
 router.post("/crear-preferencia", async (req, res) => {
   try {
-    const { sorteoId, titulo, precio, emailComprador } = req.body;
+    const { sorteoId, titulo, precio, cantidad, telefono, mpCuenta } = req.body;
 
-    const access_token = await getTokenBySorteo(sorteoId);
-
-    if (!access_token) {
-      return res.status(400).json({ error: "El sorteo no tiene cuenta MP configurada" });
+    if (!sorteoId || !titulo || !precio || !telefono) {
+      console.log("❌ Faltan campos:", req.body);
+      return res.status(400).json({ error: "Faltan campos obligatorios" });
     }
 
-    // Crear cliente MercadoPago con el token correcto
-    const mpClient = new MercadoPagoConfig({ accessToken: access_token });
-    const preferenceClient = new Preference(mpClient);
+    const client = getMPClient(mpCuenta);
+    const preference = new Preference(client);
 
-    const result = await preferenceClient.create({
+    const result = await preference.create({
       body: {
         items: [
           {
             id: sorteoId,
             title: titulo,
-            quantity: 1,
+            quantity: cantidad || 1,
             unit_price: Number(precio),
           },
         ],
         metadata: {
           sorteoId,
-          emailComprador,
+          telefono,
         },
         back_urls: {
           success: "https://sorteoslxm.com/success",
-          failure: "https://sorteoslxm.com/error",
+          failure: "https://sorteoslxm.com/failure",
           pending: "https://sorteoslxm.com/pending",
         },
         auto_return: "approved",
-        notification_url: "https://sorteoslxm-server-clean.onrender.com/webhook-pago",
       },
     });
 
     return res.json({
-      ok: true,
       init_point: result.init_point,
-      id: result.id,
+      preferenceId: result.id,
     });
 
-  } catch (error) {
-    console.error("❌ ERROR crear preferencia:", error);
+  } catch (err) {
+    console.error("❌ ERROR MP crear preferencia:", err);
     return res.status(500).json({ error: "Error creando preferencia" });
   }
 });
 
-/*
-  WEBHOOK
---------------------------------------------------*/
-router.post("/webhook-pago", async (req, res) => {
+/* ------------------------------------------------------- */
+/*                        WEBHOOK MP                        */
+/* ------------------------------------------------------- */
+router.post("/webhook", async (req, res) => {
   try {
-    console.log("📥 Webhook recibido:", req.body);
-    let paymentId = null;
+    const data = req.body;
 
-    if (req.body.data?.id) paymentId = req.body.data.id;
-    if (!paymentId && req.body.resource?.includes("/merchant_orders/")) {
-      paymentId = req.body.resource.split("/").pop();
-    }
+    if (data.type !== "payment") return res.sendStatus(200);
 
-    if (!paymentId) return res.sendStatus(200);
+    const paymentId = data.data.id;
 
-    // Leer pago con fallback (solo metadata)
-    const fallbackClient = new MercadoPagoConfig({
-      accessToken: process.env.MP_FALLBACK_TOKEN,
+    const resp = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: `Bearer ${process.env.MP_FALLBACK_TOKEN}` },
     });
-    const fallbackPayment = new Payment(fallbackClient);
 
-    let pagoInfo;
-    try {
-      pagoInfo = await fallbackPayment.get({ id: paymentId });
-    } catch (err) {
-      console.log("❌ No se pudo leer pago:", err);
-      return res.sendStatus(200);
-    }
+    const pago = await resp.json();
 
-    const sorteoId = pagoInfo?.metadata?.sorteoId;
+    if (pago.status !== "approved") return res.sendStatus(200);
+
+    const sorteoId = pago.metadata?.sorteoId;
+    const telefono = pago.metadata?.telefono;
+
     if (!sorteoId) return res.sendStatus(200);
 
-    // Token correcto según sorteo
-    const access_token = await getTokenBySorteo(sorteoId);
-    if (!access_token) return res.sendStatus(200);
+    const docRef = db.collection("sorteos").doc(sorteoId);
+    const doc = await docRef.get();
 
-    // Leer pago con el token correcto
-    const mpClient = new MercadoPagoConfig({ accessToken: access_token });
-    const paymentClient = new Payment(mpClient);
-    const pagoFinal = await paymentClient.get({ id: paymentId });
+    if (!doc.exists) return res.sendStatus(200);
 
-    if (pagoFinal.status === "approved") {
-      console.log("💰 Pago aprobado para sorteo", sorteoId);
+    const datos = doc.data();
 
-      await db.collection("sorteos").doc(sorteoId).update({
-        chancesOcupadas: pagoFinal.transaction_details?.total_paid_amount || 1,
-        editedAt: new Date().toISOString(),
-      });
-    }
+    await docRef.update({
+      chancesOcupadas: (datos.chancesOcupadas || 0) + 1,
+      editedAt: new Date().toISOString(),
+    });
 
-    return res.sendStatus(200);
+    res.sendStatus(200);
 
-  } catch (error) {
-    console.error("❌ ERROR webhook:", error);
-    return res.sendStatus(500);
+  } catch (err) {
+    console.error("❌ ERROR WEBHOOK:", err);
+    res.sendStatus(500);
   }
 });
 
