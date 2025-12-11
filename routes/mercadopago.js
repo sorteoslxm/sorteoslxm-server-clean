@@ -67,8 +67,10 @@ router.post("/crear-preferencia", async (req, res) => {
           pending: "https://sorteoslxm.com/pending",
         },
         auto_return: "approved",
+
+        // 🔥🔥🔥 CORREGIDO AQUÍ 🔥🔥🔥
         notification_url:
-          "https://sorteoslxm-server-clean.onrender.com/mercadopago/webhook",
+          "https://sorteoslxm-server-clean.onrender.com/webhook-pago",
       },
     });
 
