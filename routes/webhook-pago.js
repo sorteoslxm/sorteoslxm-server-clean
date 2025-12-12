@@ -1,6 +1,6 @@
 // FILE: routes/webhook-pago.js
 import express from "express";
-import { MercadoPagoConfig, Payment } from "mercadopago";
+import { MercadoPagoConfig, Payment, MerchantOrder } from "mercadopago";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
@@ -8,9 +8,9 @@ const router = express.Router();
 // MercadoPago requiere RAW
 router.use(express.raw({ type: "*/*" }));
 
-// Unificar extracción de paymentId
+// Función segura para obtener paymentId desde body
 function extractPaymentId(body) {
-  if (body?.topic === "payment" && body?.resource && !isNaN(body.resource)) {
+  if (body?.topic === "payment" && body.resource && !isNaN(body.resource)) {
     return body.resource;
   }
   if (body?.type === "payment" && body?.data?.id) {
@@ -27,21 +27,16 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 ANTI-DOBLE EJECUCIÓN
+    // 🔒 Anti-doble ejecución
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     const lockSnap = await lockRef.get();
-
     if (lockSnap.exists) {
       console.log("⚠ Webhook duplicado ignorado:", paymentId);
       return res.sendStatus(200);
     }
+    await lockRef.set({ processedAt: new Date(), paymentId });
 
-    await lockRef.set({
-      processedAt: new Date(),
-      paymentId,
-    });
-
-    // --- SIEMPRE TOKEN 1 PARA LEER DATOS ---
+    // Cliente MP SIEMPRE con el token de lectura (cuenta 1)
     const client = new MercadoPagoConfig({
       accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
     });
@@ -49,28 +44,67 @@ router.post("/", async (req, res) => {
     const paymentClient = new Payment(client);
     const payment = await paymentClient.get({ id: paymentId });
 
-    // METADATA REAL
-    const meta = payment.metadata || {};
+    const merchantOrderClient = new MerchantOrder(client);
 
-    const sorteoId = meta.sorteoId || null;
-    const compraId = meta.compraId || null;
-    const cantidad = Number(meta.cantidad || 1);
-    const telefono = meta.telefono || null;
-    const mpCuenta = meta.mpCuenta || "1";
+    // ============================================================
+    // 🔍 PRIORIDAD PARA ENCONTRAR compraId
+    // ============================================================
+
+    let compraId = null;
+
+    // 1️⃣ PRIMERO: payment.metadata.compraId
+    if (payment.metadata?.compraId) {
+      compraId = payment.metadata.compraId;
+      console.log("🟢 compraId desde metadata:", compraId);
+    }
+
+    // 2️⃣ SEGUNDO: merchant_order.preference_id
+    if (!compraId && payment.order?.id) {
+      const mo = await merchantOrderClient.get({ merchantOrderId: payment.order.id });
+      if (mo.body.preference_id) {
+        compraId = mo.body.preference_id;
+        console.log("🟢 compraId desde merchant_order -> preference_id:", compraId);
+      }
+    }
+
+    // 3️⃣ TERCERO: external_reference
+    if (!compraId && payment.external_reference) {
+      compraId = payment.external_reference;
+      console.log("🟢 compraId desde external_reference:", compraId);
+    }
 
     if (!compraId) {
-      console.error("❌ ERROR: metadata SIN compraId");
+      console.error("❌ No se encontró compraId desde ninguna fuente");
       return res.sendStatus(200);
     }
 
-    // Actualizar compra
+    // ============================================================
+    // Información adicional
+    // ============================================================
+
+    const sorteoId =
+      payment.metadata?.sorteoId ||
+      payment.additional_info?.items?.[0]?.id ||
+      null;
+
+    const cantidad = Number(payment.metadata?.cantidad || 1);
+    const telefono = payment.metadata?.telefono || null;
+    const mpCuenta = payment.metadata?.mpCuenta || "1";
+
+    // ============================================================
+    // 📝 Actualizar compra
+    // ============================================================
+
     const compraRef = db.collection("compras").doc(compraId);
     await compraRef.update({
       status: payment.status === "approved" ? "pagado" : "pendiente",
       updatedAt: new Date().toISOString(),
     });
 
-    // Crear chances SOLO SI APROBADO
+    // ============================================================
+    // 🎟 Crear chances SOLO si está aprobado
+    // ============================================================
+
     if (payment.status === "approved") {
       for (let i = 0; i < cantidad; i++) {
         await db.collection("chances").add({
