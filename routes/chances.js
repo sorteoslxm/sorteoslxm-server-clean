@@ -4,18 +4,45 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
+// ===========================
+// GET /chances
+// ===========================
 router.get("/", async (req, res) => {
   try {
     const limit = Number(req.query.limit) || 200;
-    const snap = await db.collection("chances").orderBy("createdAt", "desc").limit(limit).get();
-    const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    const snap = await db
+      .collection("chances")
+      .orderBy("createdAt", "desc")
+      .limit(limit)
+      .get();
+
+    const lista = snap.docs.map((d) => {
+      const data = d.data();
+
+      return {
+        id: d.id,
+        ...data,
+
+        // Normalización (compatibilidad con chances viejas)
+        createdAt: data.createdAt || data.fecha || null,
+        mpStatus: data.mpStatus || "approved",
+        mpPaymentId: data.mpPaymentId || null,
+        numero: data.numero || 1,
+      };
+    });
+
     res.json(lista);
+
   } catch (err) {
     console.error("GET /chances ERROR:", err);
     res.status(500).json({ error: "Error obteniendo chances" });
   }
 });
 
+// ===========================
+// GET /chances/resumen
+// ===========================
 router.get("/resumen", async (req, res) => {
   try {
     const sorteosSnap = await db.collection("sorteos").get();
@@ -26,7 +53,11 @@ router.get("/resumen", async (req, res) => {
 
     const respuesta = sorteos.map((sorteo) => {
       const comprasDeEste = compras.filter((c) => c.sorteoId === sorteo.id);
-      const vendidos = comprasDeEste.reduce((acc, c) => acc + (c.cantidad || 0), 0);
+      const vendidos = comprasDeEste.reduce(
+        (acc, c) => acc + (c.cantidad || 0),
+        0
+      );
+
       return {
         sorteoId: sorteo.id,
         titulo: sorteo.titulo,
@@ -38,6 +69,7 @@ router.get("/resumen", async (req, res) => {
     });
 
     res.json(respuesta);
+
   } catch (err) {
     console.error("GET /chances/resumen ERROR:", err);
     res.status(500).json({ error: "Error interno" });

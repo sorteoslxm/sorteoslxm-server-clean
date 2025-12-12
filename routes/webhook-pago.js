@@ -8,7 +8,7 @@ const router = express.Router();
 // Webhook requiere RAW para MP
 router.use(express.raw({ type: "*/*" }));
 
-// Obtener token según mpCuenta (misma lógica que crear-preferencia)
+// Obtener token según mpCuenta
 function getToken(mpCuenta) {
   if (!mpCuenta) return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
 
@@ -23,22 +23,19 @@ function getToken(mpCuenta) {
 
 router.post("/", async (req, res) => {
   try {
-    // Convertir RAW a JSON
     const body = JSON.parse(req.body.toString("utf8"));
     console.log("📥 Webhook:", JSON.stringify(body, null, 2));
 
     const { topic, type, data, resource } = body;
 
-    // Solo aceptar notificaciones de pago
     if (topic !== "payment" && type !== "payment") {
       return res.sendStatus(200);
     }
 
-    // Obtener ID del pago
     const paymentId = data?.id || resource;
     if (!paymentId) return res.sendStatus(200);
 
-    // --- 0) Anti-duplicado ---
+    // Anti-duplicación
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     const lockSnap = await lockRef.get();
 
@@ -47,15 +44,13 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Crear lock
     await lockRef.set({
       paymentId,
       processedAt: new Date(),
     });
 
-    // --- 1) Metadata preliminar
+    // Metadata preliminar
     const prelimMeta = body?.data?.metadata || {};
-
     const mpCuenta =
       prelimMeta.mpCuenta || prelimMeta.mp_cuenta || "1";
 
@@ -66,13 +61,11 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // --- 2) Inicializar SDK con el token correcto
-    const client = new MercadoPagoConfig({
-      accessToken: token,
-    });
+    // Inicializar SDK
+    const client = new MercadoPagoConfig({ accessToken: token });
     const paymentClient = new Payment(client);
 
-    // --- 3) Consultar el pago real (con metadata correcta)
+    // Obtener pago real
     const payment = await paymentClient.get({ id: paymentId });
     const meta = payment?.metadata || {};
 
@@ -86,7 +79,7 @@ router.post("/", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // --- 4) Buscar compra ---
+    // Buscar compra
     const compraRef = db.collection("compras").doc(compraId);
     const snap = await compraRef.get();
 
@@ -98,19 +91,25 @@ router.post("/", async (req, res) => {
     const compra = snap.data();
     const chancesRef = db.collection("chances");
 
-    // --- 5) Crear chances ---
+    // Crear chances con campos completos
     for (let i = 0; i < cantidad; i++) {
       await chancesRef.add({
         sorteoId,
         compraId,
         usuario: compra.usuario || null,
         telefono,
-        fecha: new Date(),
+        createdAt: new Date().toISOString(),
+
+        // Campos correctos para AdminChances
+        mpStatus: payment?.status || "pending",
+        mpPaymentId: paymentId,
+        numero: i + 1,
+
         mpCuenta,
       });
     }
 
-    // --- 6) Marcar compra como pagada ---
+    // Marcar compra como pagada
     await compraRef.update({
       status: "pagado",
       updatedAt: new Date().toISOString(),
@@ -119,6 +118,7 @@ router.post("/", async (req, res) => {
     console.log(`✅ ${cantidad} chances generadas para sorteo ${sorteoId}`);
 
     return res.sendStatus(200);
+
   } catch (e) {
     console.error("❌ ERROR WEBHOOK:", e);
     return res.sendStatus(500);
