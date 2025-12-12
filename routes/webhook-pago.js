@@ -8,7 +8,7 @@ const router = express.Router();
 // MercadoPago requiere RAW
 router.use(express.raw({ type: "*/*" }));
 
-// Unificar extracción de paymentId
+// Unificar extracción del paymentId
 function extractPaymentId(body) {
   if (body?.topic === "payment" && body?.resource && !isNaN(body.resource)) {
     return body.resource;
@@ -27,7 +27,7 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 Anti doble ejecución
+    // 🔒 ANTI-DOBLE EJECUCIÓN
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     const lockSnap = await lockRef.get();
 
@@ -41,7 +41,7 @@ router.post("/", async (req, res) => {
       paymentId,
     });
 
-    // 🔑 Siempre token 1
+    // 🔥 SIEMPRE LEEMOS PAYMENT DIRECTO — NO merchant_order
     const client = new MercadoPagoConfig({
       accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
     });
@@ -49,28 +49,32 @@ router.post("/", async (req, res) => {
     const paymentClient = new Payment(client);
     const payment = await paymentClient.get({ id: paymentId });
 
-    // METADATA
     const meta = payment.metadata || {};
 
-    const sorteoId = meta.sorteoId || null;
-    const compraId = meta.compraId || null;
-    const cantidad = Number(meta.cantidad || 1);
-    const telefono = meta.telefono || null;
-    const mpCuenta = meta.mpCuenta || "1";
+    // 🔥 1) Primero buscar metadata correcta
+    let compraId = meta.compraId || null;
+    let sorteoId = meta.sorteoId || null;
+    let cantidad = Number(meta.cantidad || 1);
+    let telefono = meta.telefono || null;
+
+    // 🔥 2) Si falta compraId → usar external_reference
+    if (!compraId && payment.external_reference) {
+      compraId = payment.external_reference;
+    }
 
     if (!compraId) {
-      console.error("❌ ERROR: metadata SIN compraId");
+      console.error("❌ ERROR: SIN compraId posible");
       return res.sendStatus(200);
     }
 
-    // Actualizar compra
+    // 🔥 Actualizar compra
     const compraRef = db.collection("compras").doc(compraId);
     await compraRef.update({
       status: payment.status === "approved" ? "pagado" : "pendiente",
       updatedAt: new Date().toISOString(),
     });
 
-    // Crear chances SOLO SI APROBADO
+    // 🔥 Crear chances SOLO si está aprobado
     if (payment.status === "approved") {
       for (let i = 0; i < cantidad; i++) {
         await db.collection("chances").add({
@@ -80,17 +84,15 @@ router.post("/", async (req, res) => {
           createdAt: new Date().toISOString(),
           mpStatus: "approved",
           mpPaymentId: paymentId,
-          mpCuenta,
         });
       }
 
-      console.log(`🎉 ${cantidad} chances generadas para sorteo ${sorteoId}`);
+      console.log(`🎉 ${cantidad} chances creadas para sorteo ${sorteoId}`);
     } else {
-      console.log(`⚠ Pago recibido pero no aprobado (${payment.status})`);
+      console.log(`⚠ Pago recibido sin aprobar: ${payment.status}`);
     }
 
     return res.sendStatus(200);
-
   } catch (err) {
     console.error("❌ ERROR webhook:", err);
     return res.sendStatus(500);
