@@ -29,6 +29,8 @@ router.get("/", async (req, res) => {
         mpStatus: data.mpStatus || "approved",
         mpPaymentId: data.mpPaymentId || null,
         numero: data.numero || 1,
+        sorteoId: data.sorteoId || null,
+        compraId: data.compraId || null,
       };
     });
 
@@ -45,26 +47,41 @@ router.get("/", async (req, res) => {
 // ===========================
 router.get("/resumen", async (req, res) => {
   try {
+    // ----- 1) Obtener sorteos -----
     const sorteosSnap = await db.collection("sorteos").get();
-    const sorteos = sorteosSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const sorteos = sorteosSnap.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
+    // ----- 2) Obtener compras -----
     const comprasSnap = await db.collection("compras").get();
-    const compras = comprasSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const compras = comprasSnap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+    }));
 
+    // ----- 3) Armar resumen por sorteo -----
     const respuesta = sorteos.map((sorteo) => {
-      const comprasDeEste = compras.filter((c) => c.sorteoId === sorteo.id);
-      const vendidos = comprasDeEste.reduce(
-        (acc, c) => acc + (c.cantidad || 0),
-        0
+      const comprasDeEste = compras.filter(
+        (c) => c.sorteoId === sorteo.id
       );
+
+      // Cantidad total de números vendidos (solo pagados)
+      const vendidos = comprasDeEste.reduce((acc, c) => {
+        if (c.status === "pagado") {
+          return acc + (Number(c.cantidad) || 0);
+        }
+        return acc;
+      }, 0);
 
       return {
         sorteoId: sorteo.id,
         titulo: sorteo.titulo,
-        numerosTotales: sorteo.numerosTotales,
+        numerosTotales: sorteo.numerosTotales || 0,
         vendidos,
         restantes: (sorteo.numerosTotales || 0) - vendidos,
-        compradores: comprasDeEste,
+        compras: comprasDeEste,
       };
     });
 
