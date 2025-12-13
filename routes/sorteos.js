@@ -4,11 +4,12 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* 🟦 Obtener todos los sorteos */
+/* 🟦 Obtener todos los sorteos (excluye eliminados) */
 router.get("/", async (req, res) => {
   try {
     const snap = await db
       .collection("sorteos")
+      .where("eliminado", "!=", true)
       .orderBy("createdAt", "desc")
       .get();
 
@@ -44,12 +45,13 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* 🟨 Obtener un sorteo por ID */
+/* 🟨 Obtener un sorteo por ID (si no está eliminado) */
 router.get("/:id", async (req, res) => {
   try {
     const docRef = db.collection("sorteos").doc(req.params.id);
     const doc = await docRef.get();
-    if (!doc.exists) {
+
+    if (!doc.exists || doc.data()?.eliminado === true) {
       return res.status(404).json({ error: "Sorteo no encontrado" });
     }
 
@@ -79,18 +81,16 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-/* 🟩 Editar sorteo - devuelve el documento actualizado */
+/* 🟩 Editar sorteo */
 router.put("/:id", async (req, res) => {
   try {
     const id = req.params.id;
     let data = { ...req.body };
 
-    // Limpiar undefined/null
     Object.keys(data).forEach((key) => {
       if (data[key] === undefined || data[key] === null) delete data[key];
     });
 
-    // Cast numéricos
     if (data.precio !== undefined) data.precio = Number(data.precio);
     if (data.numerosTotales !== undefined)
       data.numerosTotales = Number(data.numerosTotales);
@@ -115,7 +115,6 @@ router.post("/", async (req, res) => {
   try {
     let data = { ...req.body };
 
-    // Limpiar valores nulos
     Object.keys(data).forEach((key) => {
       if (data[key] === undefined || data[key] === null) delete data[key];
     });
@@ -126,6 +125,7 @@ router.post("/", async (req, res) => {
 
     const docRef = await db.collection("sorteos").add({
       ...data,
+      eliminado: false,
       createdAt: new Date().toISOString(),
     });
 
@@ -133,6 +133,30 @@ router.post("/", async (req, res) => {
   } catch (e) {
     console.error("POST /sorteos ERROR:", e);
     res.status(500).json({ error: "Error al crear sorteo" });
+  }
+});
+
+/* 🟥 Eliminar sorteo (soft delete) */
+router.delete("/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const ref = db.collection("sorteos").doc(id);
+    const snap = await ref.get();
+
+    if (!snap.exists) {
+      return res.status(404).json({ error: "Sorteo no encontrado" });
+    }
+
+    await ref.update({
+      eliminado: true,
+      eliminadoAt: new Date().toISOString(),
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("DELETE /sorteos ERROR:", e);
+    res.status(500).json({ error: "Error eliminando sorteo" });
   }
 });
 
