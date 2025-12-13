@@ -1,41 +1,42 @@
 // FILE: routes/sorteos.js
+// FILE: routes/sorteos.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* 🟦 Obtener todos los sorteos (excluye eliminados) */
+/* 🟦 Obtener todos los sorteos (excluye eliminados SIN índice) */
 router.get("/", async (req, res) => {
   try {
     const snap = await db
       .collection("sorteos")
-      .where("eliminado", "==", false) // ✅ FIX FIRESTORE
       .orderBy("createdAt", "desc")
       .get();
 
     const lista = await Promise.all(
-      snap.docs.map(async (doc) => {
-        const sorteo = { id: doc.id, ...doc.data() };
+      snap.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((s) => s.eliminado !== true)
+        .map(async (sorteo) => {
+          const chancesSnap = await db
+            .collection("chances")
+            .where("sorteoId", "==", sorteo.id)
+            .get();
 
-        const chancesSnap = await db
-          .collection("chances")
-          .where("sorteoId", "==", doc.id)
-          .get();
+          const chancesVendidas = chancesSnap.size;
+          const chancesTotales = Number(sorteo.numerosTotales || 0);
+          const chancesDisponibles = Math.max(
+            chancesTotales - chancesVendidas,
+            0
+          );
 
-        const chancesVendidas = chancesSnap.size;
-        const chancesTotales = Number(sorteo.numerosTotales || 0);
-        const chancesDisponibles = Math.max(
-          chancesTotales - chancesVendidas,
-          0
-        );
-
-        return {
-          ...sorteo,
-          chancesVendidas,
-          chancesDisponibles,
-          cerrado: chancesDisponibles <= 0,
-        };
-      })
+          return {
+            ...sorteo,
+            chancesVendidas,
+            chancesDisponibles,
+            cerrado: chancesDisponibles <= 0,
+          };
+        })
     );
 
     res.json(lista);
@@ -59,7 +60,7 @@ router.get("/:id", async (req, res) => {
 
     const chancesSnap = await db
       .collection("chances")
-      .where("sorteoId", "==", doc.id)
+      .where("sorteoId", "==", sorteo.id)
       .get();
 
     const chancesVendidas = chancesSnap.size;
@@ -125,7 +126,7 @@ router.post("/", async (req, res) => {
 
     const docRef = await db.collection("sorteos").add({
       ...data,
-      eliminado: false, // ✅ importante
+      eliminado: false,
       createdAt: new Date().toISOString(),
     });
 
@@ -140,7 +141,6 @@ router.post("/", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const id = req.params.id;
-
     const ref = db.collection("sorteos").doc(id);
     const snap = await ref.get();
 
