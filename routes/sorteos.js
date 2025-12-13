@@ -9,7 +9,7 @@ router.get("/", async (req, res) => {
   try {
     const snap = await db
       .collection("sorteos")
-      .where("eliminado", "!=", true)
+      .where("eliminado", "==", false) // ✅ FIX FIRESTORE
       .orderBy("createdAt", "desc")
       .get();
 
@@ -125,7 +125,7 @@ router.post("/", async (req, res) => {
 
     const docRef = await db.collection("sorteos").add({
       ...data,
-      eliminado: false,
+      eliminado: false, // ✅ importante
       createdAt: new Date().toISOString(),
     });
 
