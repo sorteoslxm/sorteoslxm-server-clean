@@ -13,7 +13,9 @@ router.post("/login", (req, res) => {
 
   if (!ADMIN_PASS) {
     console.error("❌ Falta ADMIN_PASS en Render");
-    return res.status(500).json({ error: "Error en configuración del servidor" });
+    return res
+      .status(500)
+      .json({ error: "Error en configuración del servidor" });
   }
 
   if (password === ADMIN_PASS) {
@@ -50,11 +52,8 @@ router.get("/dashboard/ventas", async (req, res) => {
       return res.status(401).json({ error: "No autorizado" });
     }
 
-    // 🔹 Traemos todas las compras aprobadas
-    const comprasSnap = await db
-      .collection("compras")
-      .where("status", "==", "approved")
-      .get();
+    // 🔹 Traemos TODAS las compras
+    const comprasSnap = await db.collection("compras").get();
 
     let totalRecaudado = 0;
     let totalChancesVendidas = 0;
@@ -63,8 +62,16 @@ router.get("/dashboard/ventas", async (req, res) => {
     comprasSnap.forEach((doc) => {
       const c = doc.data();
 
-      totalRecaudado += Number(c.total || 0);
-      totalChancesVendidas += Number(c.chances?.length || 0);
+      // 🔎 Status flexible (no dependemos de uno solo)
+      const status = c.status || c.estado || "";
+
+      if (status !== "approved" && status !== "aprobado") return;
+
+      const totalCompra = Number(c.total || 0);
+      const chancesCompra = Number(c.chances?.length || 0);
+
+      totalRecaudado += totalCompra;
+      totalChancesVendidas += chancesCompra;
 
       if (!ventasPorSorteoMap[c.sorteoId]) {
         ventasPorSorteoMap[c.sorteoId] = {
@@ -75,11 +82,8 @@ router.get("/dashboard/ventas", async (req, res) => {
         };
       }
 
-      ventasPorSorteoMap[c.sorteoId].chancesVendidas +=
-        Number(c.chances?.length || 0);
-
-      ventasPorSorteoMap[c.sorteoId].totalRecaudado +=
-        Number(c.total || 0);
+      ventasPorSorteoMap[c.sorteoId].chancesVendidas += chancesCompra;
+      ventasPorSorteoMap[c.sorteoId].totalRecaudado += totalCompra;
     });
 
     const ventasPorSorteo = Object.values(ventasPorSorteoMap);
@@ -94,7 +98,9 @@ router.get("/dashboard/ventas", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Error dashboard ventas:", error);
-    res.status(500).json({ error: "Error obteniendo dashboard de ventas" });
+    res
+      .status(500)
+      .json({ error: "Error obteniendo dashboard de ventas" });
   }
 });
 
