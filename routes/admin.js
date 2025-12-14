@@ -9,16 +9,12 @@ const router = express.Router();
 ============================ */
 router.post("/login", (req, res) => {
   const { password } = req.body;
-  const ADMIN_PASS = process.env.ADMIN_PASS;
 
-  if (!ADMIN_PASS) {
-    console.error("❌ Falta ADMIN_PASS en Render");
-    return res
-      .status(500)
-      .json({ error: "Error en configuración del servidor" });
+  if (!process.env.ADMIN_PASS) {
+    return res.status(500).json({ error: "ADMIN_PASS no configurado" });
   }
 
-  if (password === ADMIN_PASS) {
+  if (password === process.env.ADMIN_PASS) {
     return res.json({
       success: true,
       token: process.env.ADMIN_TOKEN,
@@ -29,78 +25,80 @@ router.post("/login", (req, res) => {
 });
 
 /* ============================
-   🔐 VALIDAR TOKEN ADMIN
+   🔐 VALIDAR TOKEN
 ============================ */
 router.get("/validate", (req, res) => {
   const token = req.headers["x-admin-token"];
-
-  if (!token || token !== process.env.ADMIN_TOKEN) {
+  if (token !== process.env.ADMIN_TOKEN) {
     return res.status(401).json({ error: "Token inválido" });
   }
-
   res.json({ success: true });
 });
 
 /* ============================
-   📊 DASHBOARD DE VENTAS
+   📊 DASHBOARD VENTAS (REAL)
+   Fuente: CHANCES + SORTEOS
 ============================ */
 router.get("/dashboard/ventas", async (req, res) => {
   try {
     const token = req.headers["x-admin-token"];
-
-    if (!token || token !== process.env.ADMIN_TOKEN) {
+    if (token !== process.env.ADMIN_TOKEN) {
       return res.status(401).json({ error: "No autorizado" });
     }
 
-    // 🔹 Traemos TODAS las compras
-    const comprasSnap = await db.collection("compras").get();
+    // 1️⃣ Traer sorteos (para precio fallback)
+    const sorteosSnap = await db.collection("sorteos").get();
+    const sorteosMap = {};
+    sorteosSnap.forEach((d) => {
+      sorteosMap[d.id] = d.data();
+    });
+
+    // 2️⃣ Traer chances aprobadas (o sin estado viejo)
+    const chancesSnap = await db.collection("chances").get();
 
     let totalRecaudado = 0;
     let totalChancesVendidas = 0;
-    const ventasPorSorteoMap = {};
+    const ventasPorSorteo = {};
 
-    comprasSnap.forEach((doc) => {
+    chancesSnap.forEach((doc) => {
       const c = doc.data();
 
-      // 🔎 Status flexible (no dependemos de uno solo)
-      const status = c.status || c.estado || "";
+      const estado = c.mpStatus || "approved";
+      if (estado !== "approved") return;
 
-      if (status !== "approved" && status !== "aprobado") return;
+      const sorteo = sorteosMap[c.sorteoId] || {};
+      const precio =
+        Number(c.precio) ||
+        Number(sorteo.precio) ||
+        0;
 
-      const totalCompra = Number(c.total || 0);
-      const chancesCompra = Number(c.chances?.length || 0);
+      totalRecaudado += precio;
+      totalChancesVendidas += 1;
 
-      totalRecaudado += totalCompra;
-      totalChancesVendidas += chancesCompra;
-
-      if (!ventasPorSorteoMap[c.sorteoId]) {
-        ventasPorSorteoMap[c.sorteoId] = {
+      if (!ventasPorSorteo[c.sorteoId]) {
+        ventasPorSorteo[c.sorteoId] = {
           sorteoId: c.sorteoId,
-          titulo: c.sorteoTitulo || "Sorteo",
+          titulo: sorteo.titulo || "Sorteo",
           chancesVendidas: 0,
           totalRecaudado: 0,
         };
       }
 
-      ventasPorSorteoMap[c.sorteoId].chancesVendidas += chancesCompra;
-      ventasPorSorteoMap[c.sorteoId].totalRecaudado += totalCompra;
+      ventasPorSorteo[c.sorteoId].chancesVendidas += 1;
+      ventasPorSorteo[c.sorteoId].totalRecaudado += precio;
     });
-
-    const ventasPorSorteo = Object.values(ventasPorSorteoMap);
 
     res.json({
       totales: {
         totalRecaudado,
         totalChancesVendidas,
-        sorteosConVentas: ventasPorSorteo.length,
+        sorteosConVentas: Object.keys(ventasPorSorteo).length,
       },
-      ventasPorSorteo,
+      ventasPorSorteo: Object.values(ventasPorSorteo),
     });
-  } catch (error) {
-    console.error("❌ Error dashboard ventas:", error);
-    res
-      .status(500)
-      .json({ error: "Error obteniendo dashboard de ventas" });
+  } catch (err) {
+    console.error("❌ Dashboard ventas error:", err);
+    res.status(500).json({ error: "Error dashboard ventas" });
   }
 });
 
