@@ -32,6 +32,7 @@ function normalizeBanner(doc) {
     url: data.url || "",
     link: data.link || "",
     createdAt: data.createdAt || 0,
+    orden: data.orden ?? data.createdAt ?? 0,
     destacado: data.destacado === true
   };
 }
@@ -47,7 +48,9 @@ router.get("/inferiores", async (req, res) => {
       .get();
 
     let banners = snap.docs.map(normalizeBanner);
-    banners.sort((a, b) => b.createdAt - a.createdAt);
+
+    // 👉 ordenar por orden (no por fecha)
+    banners.sort((a, b) => a.orden - b.orden);
 
     res.json(banners);
   } catch (err) {
@@ -102,13 +105,18 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Falta la imagen" });
 
     const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
-    const cloud = await cloudinary.uploader.upload(base64, { folder: "banners" });
+    const cloud = await cloudinary.uploader.upload(base64, {
+      folder: "banners"
+    });
+
+    const now = Date.now();
 
     const doc = await db.collection("banners").add({
       url: cloud.secure_url,
       destacado: false,
       link: "",
-      createdAt: Date.now()
+      createdAt: now,
+      orden: now // 👈 por defecto al final
     });
 
     res.json({ success: true, id: doc.id, url: cloud.secure_url });
@@ -155,6 +163,28 @@ router.patch("/:id/link", async (req, res) => {
   } catch (err) {
     console.error("LINK ERROR:", err);
     res.status(500).json({ error: "Error actualizando link" });
+  }
+});
+
+/* ================================
+   🔁 PATCH - Actualizar orden
+================================= */
+router.patch("/:id/orden", async (req, res) => {
+  try {
+    const { orden } = req.body;
+
+    if (orden === undefined) {
+      return res.status(400).json({ error: "Orden requerido" });
+    }
+
+    await db.collection("banners").doc(req.params.id).update({
+      orden: Number(orden)
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("ORDEN ERROR:", err);
+    res.status(500).json({ error: "Error actualizando orden" });
   }
 });
 
