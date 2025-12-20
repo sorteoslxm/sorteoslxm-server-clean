@@ -68,14 +68,22 @@ app.use(
 ========================================== */
 app.use(express.json());
 
-// Health check
+/* ================================
+   ❤️ HEALTH CHECK (KEEP ALIVE)
+   👉 usar para ping de Render
+================================= */
+app.get("/health", (req, res) => {
+  res.status(200).send("ok");
+});
+
+// Root
 app.get("/", (req, res) => {
   res.send("API funcionando OK");
 });
 
 // Rutas API
 app.use("/sorteos", sorteosRoutes);
-app.use("/admin", adminRoutes); // 👈 TODO admin (incluye reprocess)
+app.use("/admin", adminRoutes);
 app.use("/banners", bannersRoutes);
 app.use("/compras", comprasRoutes);
 app.use("/chances", chancesRoutes);
