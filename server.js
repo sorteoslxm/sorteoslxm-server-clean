@@ -1,3 +1,4 @@
+// FILE: server.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -10,6 +11,7 @@ import comprasRoutes from "./routes/compras.js";
 import chancesRoutes from "./routes/chances.js";
 import webhookRoutes from "./routes/webhook-pago.js";
 import mercadopagoRoutes from "./routes/mercadopago.js";
+import adminReprocessPaymentRoutes from "./routes/admin-reprocess-payment.js"; // ✅ NUEVO
 
 dotenv.config();
 
@@ -75,6 +77,7 @@ app.get("/", (req, res) => {
 // Rutas API
 app.use("/sorteos", sorteosRoutes);
 app.use("/admin", adminRoutes);
+app.use("/admin", adminReprocessPaymentRoutes); // ✅ NUEVO (reproceso pagos)
 app.use("/banners", bannersRoutes);
 app.use("/compras", comprasRoutes);
 app.use("/chances", chancesRoutes);
