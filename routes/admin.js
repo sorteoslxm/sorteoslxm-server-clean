@@ -116,7 +116,7 @@ router.post("/reprocess-merchant-order/:orderId", async (req, res) => {
     }
 
     const mpRes = await axios.get(
-      `https://api.mercadolibre.com/merchant_orders/${orderId}`,
+      `https://api.mercadopago.com/merchant_orders/${orderId}`,
       {
         headers: {
           Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN_1}`,
