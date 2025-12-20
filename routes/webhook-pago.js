@@ -17,16 +17,7 @@ function extractPaymentId(body) {
 }
 
 function getAccessToken(mpCuenta) {
-  if (!mpCuenta) return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
-
-  if (mpCuenta.startsWith("MERCADOPAGO_ACCESS_TOKEN_")) {
-    return process.env[mpCuenta];
-  }
-
-  if (mpCuenta === "2") {
-    return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
-  }
-
+  if (mpCuenta === "2") return process.env.MERCADOPAGO_ACCESS_TOKEN_2;
   return process.env.MERCADOPAGO_ACCESS_TOKEN_1;
 }
 
@@ -38,7 +29,7 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 Anti duplicados
+    // 🔒 Anti duplicados (por paymentId)
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     const lockSnap = await lockRef.get();
     if (lockSnap.exists) {
@@ -47,42 +38,49 @@ router.post("/", async (req, res) => {
     }
     await lockRef.set({ processedAt: new Date(), paymentId });
 
-    // ⚠️ PRIMER LECTURA CON TOKEN 1 SOLO PARA OBTENER METADATA BÁSICA
-    const tempClient = new MercadoPagoConfig({
-      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
-    });
-    const tempPayment = await new Payment(tempClient).get({ id: paymentId });
-    const meta = tempPayment.metadata || {};
+    // 🔍 Buscar compra asociada al paymentId
+    const compraSnap = await db
+      .collection("compras")
+      .where("mpPaymentId", "==", paymentId)
+      .limit(1)
+      .get();
 
-    // 🧠 aceptar camelCase y snake_case
-    const sorteoId = meta.sorteoId || meta.sorteo_id || null;
-    const compraId = meta.compraId || meta.compra_id || null;
-    const cantidad = Number(meta.cantidad || 1);
-    const telefono = meta.telefono || null;
-    const mpCuenta = meta.mpCuenta || meta.mp_cuenta || "1";
-
-    if (!sorteoId || !compraId) {
-      console.error("❌ ERROR: metadata incompleta", meta);
+    if (compraSnap.empty) {
+      console.error("❌ No se encontró compra para paymentId:", paymentId);
       return res.sendStatus(200);
     }
 
-    // ✅ AHORA sí: token correcto según cuenta
+    const compraDoc = compraSnap.docs[0];
+    const compra = compraDoc.data();
+
+    const {
+      sorteoId,
+      cantidad = 1,
+      telefono = null,
+      mpCuenta = "1",
+    } = compra;
+
+    // ✅ Token correcto desde el inicio
     const accessToken = getAccessToken(mpCuenta);
     const client = new MercadoPagoConfig({ accessToken });
     const payment = await new Payment(client).get({ id: paymentId });
 
-    // 🧾 actualizar compra
-    await db.collection("compras").doc(compraId).update({
-      status: payment.status === "approved" ? "pagado" : "pendiente",
+    // 🧾 Actualizar estado de compra
+    const nuevoEstado =
+      payment.status === "approved" ? "pagado" : "pendiente";
+
+    await compraDoc.ref.update({
+      status: nuevoEstado,
+      mpStatus: payment.status,
       updatedAt: new Date().toISOString(),
     });
 
-    // 🎟 crear chances
+    // 🎟 Crear chances SOLO si está aprobado
     if (payment.status === "approved") {
       for (let i = 0; i < cantidad; i++) {
         await db.collection("chances").add({
           sorteoId,
-          compraId,
+          compraId: compraDoc.id,
           telefono,
           createdAt: new Date().toISOString(),
           mpStatus: "approved",
@@ -91,7 +89,9 @@ router.post("/", async (req, res) => {
         });
       }
 
-      console.log(`🎉 ${cantidad} chances creadas para sorteo ${sorteoId} (cuenta ${mpCuenta})`);
+      console.log(
+        `🎉 ${cantidad} chances creadas para sorteo ${sorteoId} (cuenta ${mpCuenta})`
+      );
     }
 
     return res.sendStatus(200);
