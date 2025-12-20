@@ -1,60 +1,50 @@
-// FILE: /scripts/aprobar-pendientes.js
-import { db } from "../config/firebase.js"; // Ruta relativa correcta
+// FILE: scripts/aprobar-pendientes.js
+import { initializeApp, cert } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+// 🔐 FIREBASE SERVICE ACCOUNT desde variable de entorno
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
+initializeApp({
+  credential: cert(serviceAccount),
+});
+
+const db = getFirestore();
+
 async function aprobarPendientes() {
-  try {
-    const snap = await db.collection("compras")
-      .where("status", "==", "pendiente")
-      .get();
+  const snap = await db.collection("compras").where("status", "==", "pendiente").get();
 
-    if (snap.empty) {
-      console.log("✅ No hay pagos pendientes para aprobar.");
-      return;
-    }
+  if (snap.empty) {
+    console.log("✅ No hay pagos pendientes");
+    return;
+  }
 
-    console.log(`✅ Pagos pendientes encontrados: ${snap.docs.length}\n`);
+  console.log(`✅ Pagos pendientes encontrados: ${snap.docs.length}`);
 
-    for (const doc of snap.docs) {
-      const compra = doc.data();
-      const compraId = doc.id;
+  for (const doc of snap.docs) {
+    const data = doc.data();
 
-      // Actualizar estado a approved
-      await doc.ref.update({
-        status: "approved",
-        mpStatus: "approved",
-        updatedAt: new Date().toISOString(),
-        recovered: true
-      });
+    await doc.ref.update({
+      status: "approved",
+      mpStatus: "approved",
+      recovered: true,
+      reprocessedAt: new Date().toISOString(),
+    });
 
-      // Verificar si la chance ya existe
-      const chanceSnap = await db.collection("chances")
-        .where("compraId", "==", compraId)
-        .limit(1)
-        .get();
+    // ⚡ Crear chance si corresponde
+    await db.collection("chances").add({
+      sorteoId: data.sorteoId,
+      compraId: doc.id,
+      cantidad: data.cantidad || 1,
+      mpStatus: "approved",
+      createdAt: new Date().toISOString(),
+    });
 
-      if (chanceSnap.empty) {
-        // Crear chance nueva
-        const chanceData = {
-          compraId,
-          sorteoId: compra.sorteoId,
-          precio: Number(compra.cantidad) || 1,
-          mpStatus: "approved",
-          createdAt: new Date().toISOString(),
-        };
-        await db.collection("chances").add(chanceData);
-        console.log(`✔ Compra ${compraId} aprobada y chance creada.`);
-      } else {
-        console.log(`✔ Compra ${compraId} aprobada (chance ya existía).`);
-      }
-    }
-
-    console.log("\n🎉 Todos los pagos pendientes fueron procesados correctamente.");
-  } catch (err) {
-    console.error("❌ Error aprobando pagos pendientes:", err);
+    console.log(`✅ Pago aprobado y chance creado: ${doc.id}`);
   }
 }
 
-aprobarPendientes();
+aprobarPendientes().catch((err) => console.error("❌ Error:", err.message));

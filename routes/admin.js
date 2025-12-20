@@ -30,9 +30,7 @@ router.post("/login", (req, res) => {
 ============================ */
 router.get("/validate", (req, res) => {
   const token = req.headers["x-admin-token"];
-  if (token !== process.env.ADMIN_TOKEN) {
-    return res.status(401).json({ error: "Token inválido" });
-  }
+  if (token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: "Token inválido" });
   res.json({ success: true });
 });
 
