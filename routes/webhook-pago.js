@@ -29,26 +29,54 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 Anti duplicados (por paymentId)
+    // 🔒 Anti duplicados por paymentId
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     const lockSnap = await lockRef.get();
     if (lockSnap.exists) {
       console.log("⚠ Webhook duplicado ignorado:", paymentId);
       return res.sendStatus(200);
     }
-    await lockRef.set({ processedAt: new Date(), paymentId });
 
-    // 🔍 Buscar compra asociada al paymentId
-    const compraSnap = await db
+    // ⚠️ NO lockeamos todavía, primero resolvemos la compra
+
+    // 🔑 Usamos token default para leer el pago (solo GET)
+    const defaultClient = new MercadoPagoConfig({
+      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
+    });
+
+    const paymentApi = new Payment(defaultClient);
+    const payment = await paymentApi.get({ id: paymentId });
+
+    const preferenceId = payment.preference_id;
+
+    // 🔍 1) Buscar compra por mpPaymentId
+    let compraSnap = await db
       .collection("compras")
       .where("mpPaymentId", "==", paymentId)
       .limit(1)
       .get();
 
+    // 🔁 2) Fallback: buscar por mpPreferenceId
+    if (compraSnap.empty && preferenceId) {
+      compraSnap = await db
+        .collection("compras")
+        .where("mpPreferenceId", "==", preferenceId)
+        .limit(1)
+        .get();
+    }
+
     if (compraSnap.empty) {
-      console.error("❌ No se encontró compra para paymentId:", paymentId);
+      console.error(
+        "❌ No se encontró compra para paymentId:",
+        paymentId,
+        "preferenceId:",
+        preferenceId
+      );
       return res.sendStatus(200);
     }
+
+    // 🔒 Lock definitivo (ahora sí)
+    await lockRef.set({ processedAt: new Date(), paymentId });
 
     const compraDoc = compraSnap.docs[0];
     const compra = compraDoc.data();
@@ -60,18 +88,15 @@ router.post("/", async (req, res) => {
       mpCuenta = "1",
     } = compra;
 
-    // ✅ Token correcto desde el inicio
-    const accessToken = getAccessToken(mpCuenta);
-    const client = new MercadoPagoConfig({ accessToken });
-    const payment = await new Payment(client).get({ id: paymentId });
-
-    // 🧾 Actualizar estado de compra
+    // 🧾 Estado final
     const nuevoEstado =
       payment.status === "approved" ? "pagado" : "pendiente";
 
+    // ✅ Actualizar compra (CLAVE: guardar mpPaymentId)
     await compraDoc.ref.update({
       status: nuevoEstado,
       mpStatus: payment.status,
+      mpPaymentId: paymentId,
       updatedAt: new Date().toISOString(),
     });
 
