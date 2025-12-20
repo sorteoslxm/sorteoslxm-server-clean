@@ -38,7 +38,6 @@ router.get("/validate", (req, res) => {
 
 /* ============================
    📊 DASHBOARD VENTAS (REAL)
-   Fuente: CHANCES + SORTEOS
 ============================ */
 router.get("/dashboard/ventas", async (req, res) => {
   try {
@@ -47,14 +46,12 @@ router.get("/dashboard/ventas", async (req, res) => {
       return res.status(401).json({ error: "No autorizado" });
     }
 
-    // 1️⃣ Traer sorteos (para precio fallback)
     const sorteosSnap = await db.collection("sorteos").get();
     const sorteosMap = {};
     sorteosSnap.forEach((d) => {
       sorteosMap[d.id] = d.data();
     });
 
-    // 2️⃣ Traer chances aprobadas (o sin estado viejo)
     const chancesSnap = await db.collection("chances").get();
 
     let totalRecaudado = 0;
@@ -63,7 +60,6 @@ router.get("/dashboard/ventas", async (req, res) => {
 
     chancesSnap.forEach((doc) => {
       const c = doc.data();
-
       const estado = c.mpStatus || "approved";
       if (estado !== "approved") return;
 
@@ -104,10 +100,10 @@ router.get("/dashboard/ventas", async (req, res) => {
 });
 
 /* ==========================================
-   🔁 REPROCESAR MERCHANT ORDER (RECUPERAR PAGOS)
+   🔁 REPROCESAR PAYMENT (SEGURO MULTI-CUENTA)
 ========================================== */
-router.post("/reprocess-merchant-order/:orderId", async (req, res) => {
-  const { orderId } = req.params;
+router.post("/reprocess-payment/:paymentId", async (req, res) => {
+  const { paymentId } = req.params;
 
   try {
     const token = req.headers["x-admin-token"];
@@ -115,72 +111,70 @@ router.post("/reprocess-merchant-order/:orderId", async (req, res) => {
       return res.status(401).json({ error: "No autorizado" });
     }
 
+    // 🔍 Buscar compra original
+    const snap = await db
+      .collection("compras")
+      .where("paymentId", "==", String(paymentId))
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(404).json({
+        ok: false,
+        error: "Compra no encontrada",
+      });
+    }
+
+    const compra = snap.docs[0].data();
+    const mpCuenta = compra.mpCuenta || "1";
+
+    const accessToken =
+      mpCuenta === "2"
+        ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
+        : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+
+    // 🔄 Consultar payment real en MP
     const mpRes = await axios.get(
-      `https://api.mercadopago.com/merchant_orders/${orderId}`,
+      `https://api.mercadopago.com/v1/payments/${paymentId}`,
       {
         headers: {
-          Authorization: `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN_1}`,
+          Authorization: `Bearer ${accessToken}`,
         },
       }
     );
 
-    const order = mpRes.data;
+    const payment = mpRes.data;
 
-    if (!order.payments || order.payments.length === 0) {
+    if (payment.status !== "approved") {
       return res.status(400).json({
         ok: false,
-        error: "La merchant_order no tiene pagos",
+        error: "El pago no está aprobado",
+        status: payment.status,
       });
     }
 
-    const resultados = [];
-
-    for (const p of order.payments) {
-      const paymentId = String(p.id);
-
-      // 🔍 Buscar compra existente
-      const snap = await db
-        .collection("compras")
-        .where("paymentId", "==", paymentId)
-        .limit(1)
-        .get();
-
-      if (!snap.empty) {
-        resultados.push({ paymentId, status: "ya_existia" });
-        continue;
-      }
-
-      if (p.status !== "approved") {
-        resultados.push({ paymentId, status: "no_aprobado" });
-        continue;
-      }
-
-      await db.collection("compras").add({
-        paymentId,
-        merchantOrderId: orderId,
-        mpStatus: "approved",
-        amount: p.transaction_amount,
-        createdAt: new Date().toISOString(),
-        recovered: true,
-      });
-
-      resultados.push({ paymentId, status: "recuperado" });
-    }
+    // 🔁 Marcar como reprocesado
+    await db.collection("compras").doc(snap.docs[0].id).update({
+      mpStatus: "approved",
+      recovered: true,
+      reprocessedAt: new Date().toISOString(),
+    });
 
     return res.json({
       ok: true,
-      orderId,
-      resultados,
+      paymentId,
+      mpCuenta,
+      status: "reprocesado_ok",
     });
   } catch (err) {
     console.error(
-      "❌ Error reprocesando merchant_order:",
+      "❌ Error reprocesando payment:",
       err.response?.data || err.message
     );
 
     res.status(500).json({
       ok: false,
-      error: "Error reprocesando merchant_order",
+      error: "Error reprocesando payment",
     });
   }
 });
