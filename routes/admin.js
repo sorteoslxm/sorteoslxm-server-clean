@@ -64,10 +64,7 @@ router.get("/dashboard/ventas", async (req, res) => {
       if (estado !== "approved") return;
 
       const sorteo = sorteosMap[c.sorteoId] || {};
-      const precio =
-        Number(c.precio) ||
-        Number(sorteo.precio) ||
-        0;
+      const precio = Number(c.precio) || Number(sorteo.precio) || 0;
 
       totalRecaudado += precio;
       totalChancesVendidas += 1;
@@ -111,7 +108,6 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
       return res.status(401).json({ error: "No autorizado" });
     }
 
-    // 🔍 Buscar compra original
     const snap = await db
       .collection("compras")
       .where("paymentId", "==", String(paymentId))
@@ -119,10 +115,7 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
       .get();
 
     if (snap.empty) {
-      return res.status(404).json({
-        ok: false,
-        error: "Compra no encontrada",
-      });
+      return res.status(404).json({ ok: false, error: "Compra no encontrada" });
     }
 
     const compra = snap.docs[0].data();
@@ -133,14 +126,9 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
         ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
         : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
 
-    // 🔄 Consultar payment real en MP
     const mpRes = await axios.get(
       `https://api.mercadopago.com/v1/payments/${paymentId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      }
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
 
     const payment = mpRes.data;
@@ -153,7 +141,6 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
       });
     }
 
-    // 🔁 Marcar como reprocesado
     await db.collection("compras").doc(snap.docs[0].id).update({
       mpStatus: "approved",
       recovered: true,
@@ -167,15 +154,55 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
       status: "reprocesado_ok",
     });
   } catch (err) {
-    console.error(
-      "❌ Error reprocesando payment:",
-      err.response?.data || err.message
-    );
+    console.error("❌ Error reprocesando payment:", err.response?.data || err.message);
+    res.status(500).json({ ok: false, error: "Error reprocesando payment" });
+  }
+});
 
-    res.status(500).json({
-      ok: false,
-      error: "Error reprocesando payment",
+/* ==========================================
+   🔁 REPROCESAR MERCHANT ORDER (MANUAL)
+========================================== */
+router.post("/reprocess-merchant-order/:merchantOrderId", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const { merchantOrderId } = req.params;
+
+    const snap = await db
+      .collection("compras")
+      .where("merchant_order_id", "==", String(merchantOrderId))
+      .limit(1)
+      .get();
+
+    if (snap.empty) {
+      return res.status(404).json({
+        ok: false,
+        error: "Compra no encontrada",
+        merchantOrderId,
+      });
+    }
+
+    const doc = snap.docs[0];
+
+    await doc.ref.update({
+      mpStatus: "approved",
+      recovered: true,
+      reprocessedBy: "merchant_order",
+      reprocessedAt: new Date().toISOString(),
     });
+
+    return res.json({
+      ok: true,
+      message: "Merchant order reprocesada correctamente",
+      compraId: doc.id,
+      merchantOrderId,
+    });
+  } catch (err) {
+    console.error("❌ Error reprocesando merchant order:", err.message);
+    res.status(500).json({ ok: false, error: "Error reprocesando merchant order" });
   }
 });
 
