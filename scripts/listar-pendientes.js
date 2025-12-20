@@ -1,11 +1,33 @@
 // FILE: scripts/listar-pendientes.js
-import { db } from "../config/firebase.js"; // 🔹 Ruta corregida
 import dotenv from "dotenv";
-
 dotenv.config();
 
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-const SERVER_URL = process.env.SERVER_URL || "https://sorteoslxm-server-clean.onrender.com";
+import admin from "firebase-admin";
+
+const {
+  FIREBASE_PRIVATE_KEY,
+  FIREBASE_PROJECT_ID,
+  FIREBASE_CLIENT_EMAIL,
+  ADMIN_TOKEN,
+  SERVER_URL = "https://sorteoslxm-server-clean.onrender.com",
+} = process.env;
+
+// Inicializar Firebase
+if (!admin.apps.length) {
+  if (!FIREBASE_PRIVATE_KEY || !FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL) {
+    throw new Error("❌ Falta configuración de Firebase en variables de entorno");
+  }
+
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: FIREBASE_PROJECT_ID,
+      clientEmail: FIREBASE_CLIENT_EMAIL,
+      privateKey: FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+  });
+}
+
+const db = admin.firestore();
 
 async function listarPendientes() {
   try {
@@ -19,22 +41,17 @@ async function listarPendientes() {
       return;
     }
 
-    console.log(`✅ Pagos pendientes encontrados: ${snap.docs.length}\n`);
+    console.log(`✅ Pagos pendientes: ${snap.docs.length}\n`);
+    console.log("🔗 Links listos para reprocesar:\n");
 
-    snap.docs.forEach((doc) => {
+    snap.docs.forEach((doc, i) => {
       const data = doc.data();
-      const compraId = doc.id;
       const paymentId = data.mpPaymentId || "N/A";
       const merchantOrderId = data.merchant_order_id || "N/A";
 
-      console.log(`Compra ID: ${compraId}`);
-      console.log(`Sorteo ID: ${data.sorteoId}`);
-      console.log(`Estado: ${data.mpStatus}`);
-      console.log(`Payment ID: ${paymentId}`);
-      console.log(`Merchant Order ID: ${merchantOrderId}`);
-      console.log(`Cuenta MP: ${data.mpCuenta}`);
-      console.log(`Link Reprocess Payment: ${SERVER_URL}/admin/reprocess-payment/${paymentId}?token=${ADMIN_TOKEN}`);
-      console.log(`Link Reprocess Merchant Order: ${SERVER_URL}/admin/reprocess-merchant-order/${merchantOrderId}?token=${ADMIN_TOKEN}`);
+      console.log(`${i + 1}. Compra ID: ${doc.id}`);
+      console.log(`   Payment: ${SERVER_URL}/admin/reprocess-payment/${paymentId}?token=${ADMIN_TOKEN}`);
+      console.log(`   Merchant Order: ${SERVER_URL}/admin/reprocess-merchant-order/${merchantOrderId}?token=${ADMIN_TOKEN}`);
       console.log("------------------------------------------------------");
     });
   } catch (err) {
