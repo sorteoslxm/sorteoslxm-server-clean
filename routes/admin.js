@@ -42,15 +42,11 @@ router.get("/validate", (req, res) => {
 router.get("/dashboard/ventas", async (req, res) => {
   try {
     const token = req.headers["x-admin-token"];
-    if (token !== process.env.ADMIN_TOKEN) {
-      return res.status(401).json({ error: "No autorizado" });
-    }
+    if (token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: "No autorizado" });
 
     const sorteosSnap = await db.collection("sorteos").get();
     const sorteosMap = {};
-    sorteosSnap.forEach((d) => {
-      sorteosMap[d.id] = d.data();
-    });
+    sorteosSnap.forEach((d) => (sorteosMap[d.id] = d.data()));
 
     const chancesSnap = await db.collection("chances").get();
 
@@ -70,12 +66,7 @@ router.get("/dashboard/ventas", async (req, res) => {
       totalChancesVendidas += 1;
 
       if (!ventasPorSorteo[c.sorteoId]) {
-        ventasPorSorteo[c.sorteoId] = {
-          sorteoId: c.sorteoId,
-          titulo: sorteo.titulo || "Sorteo",
-          chancesVendidas: 0,
-          totalRecaudado: 0,
-        };
+        ventasPorSorteo[c.sorteoId] = { sorteoId: c.sorteoId, titulo: sorteo.titulo || "Sorteo", chancesVendidas: 0, totalRecaudado: 0 };
       }
 
       ventasPorSorteo[c.sorteoId].chancesVendidas += 1;
@@ -98,33 +89,29 @@ router.get("/dashboard/ventas", async (req, res) => {
 
 /* ==========================================
    🔁 REPROCESAR PAYMENT (SEGURO MULTI-CUENTA)
+   Busca por mpPaymentId
 ========================================== */
 router.post("/reprocess-payment/:paymentId", async (req, res) => {
   const { paymentId } = req.params;
 
   try {
     const token = req.headers["x-admin-token"];
-    if (token !== process.env.ADMIN_TOKEN) {
-      return res.status(401).json({ error: "No autorizado" });
-    }
+    if (token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: "No autorizado" });
 
     const snap = await db
       .collection("compras")
-      .where("paymentId", "==", String(paymentId))
+      .where("mpPaymentId", "==", String(paymentId))
       .limit(1)
       .get();
 
-    if (snap.empty) {
-      return res.status(404).json({ ok: false, error: "Compra no encontrada" });
-    }
+    if (snap.empty) return res.status(404).json({ ok: false, error: "Compra no encontrada" });
 
     const compra = snap.docs[0].data();
     const mpCuenta = compra.mpCuenta || "1";
 
-    const accessToken =
-      mpCuenta === "2"
-        ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
-        : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+    const accessToken = mpCuenta === "2"
+      ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
+      : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
 
     const mpRes = await axios.get(
       `https://api.mercadopago.com/v1/payments/${paymentId}`,
@@ -134,11 +121,7 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
     const payment = mpRes.data;
 
     if (payment.status !== "approved") {
-      return res.status(400).json({
-        ok: false,
-        error: "El pago no está aprobado",
-        status: payment.status,
-      });
+      return res.status(400).json({ ok: false, error: "El pago no está aprobado", status: payment.status });
     }
 
     await db.collection("compras").doc(snap.docs[0].id).update({
@@ -147,12 +130,7 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
       reprocessedAt: new Date().toISOString(),
     });
 
-    return res.json({
-      ok: true,
-      paymentId,
-      mpCuenta,
-      status: "reprocesado_ok",
-    });
+    res.json({ ok: true, paymentId, mpCuenta, status: "reprocesado_ok" });
   } catch (err) {
     console.error("❌ Error reprocesando payment:", err.response?.data || err.message);
     res.status(500).json({ ok: false, error: "Error reprocesando payment" });
@@ -161,45 +139,34 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
 
 /* ==========================================
    🔁 REPROCESAR MERCHANT ORDER (MANUAL)
+   Busca por merchant_order_id
 ========================================== */
 router.post("/reprocess-merchant-order/:merchantOrderId", async (req, res) => {
+  const { merchantOrderId } = req.params;
+
   try {
     const token = req.headers["x-admin-token"];
-    if (token !== process.env.ADMIN_TOKEN) {
-      return res.status(401).json({ error: "No autorizado" });
-    }
-
-    const { merchantOrderId } = req.params;
+    if (token !== process.env.ADMIN_TOKEN) return res.status(401).json({ error: "No autorizado" });
 
     const snap = await db
       .collection("compras")
       .where("merchant_order_id", "==", String(merchantOrderId))
-      .limit(1)
       .get();
 
-    if (snap.empty) {
-      return res.status(404).json({
-        ok: false,
-        error: "Compra no encontrada",
-        merchantOrderId,
+    if (snap.empty) return res.status(404).json({ ok: false, error: "Compras no encontradas", merchantOrderId });
+
+    const resultados = [];
+    for (const doc of snap.docs) {
+      await doc.ref.update({
+        mpStatus: "approved",
+        recovered: true,
+        reprocessedBy: "merchant_order",
+        reprocessedAt: new Date().toISOString(),
       });
+      resultados.push({ compraId: doc.id, status: "reprocesada" });
     }
 
-    const doc = snap.docs[0];
-
-    await doc.ref.update({
-      mpStatus: "approved",
-      recovered: true,
-      reprocessedBy: "merchant_order",
-      reprocessedAt: new Date().toISOString(),
-    });
-
-    return res.json({
-      ok: true,
-      message: "Merchant order reprocesada correctamente",
-      compraId: doc.id,
-      merchantOrderId,
-    });
+    res.json({ ok: true, merchantOrderId, resultados });
   } catch (err) {
     console.error("❌ Error reprocesando merchant order:", err.message);
     res.status(500).json({ ok: false, error: "Error reprocesando merchant order" });
