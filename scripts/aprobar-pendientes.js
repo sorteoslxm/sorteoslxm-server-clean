@@ -5,14 +5,12 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// 🔹 Inicializar Firebase usando variable de Render o localmente
-const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
-  ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-  : {
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    };
+// 🔐 FIREBASE SERVICE ACCOUNT desde variable de entorno
+if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+  throw new Error("❌ No se encontró FIREBASE_SERVICE_ACCOUNT en .env");
+}
+
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 initializeApp({
   credential: cert(serviceAccount),
@@ -22,7 +20,7 @@ const db = getFirestore();
 
 async function aprobarPendientes() {
   try {
-    // 🔹 Buscar compras pendientes
+    // 🔎 Buscar pagos pendientes por mpStatus
     const snap = await db.collection("compras").where("mpStatus", "==", "pendiente").get();
 
     if (snap.empty) {
@@ -30,20 +28,20 @@ async function aprobarPendientes() {
       return;
     }
 
-    console.log(`✅ Pagos pendientes encontrados: ${snap.docs.length}`);
+    console.log(`✅ Pagos pendientes encontrados: ${snap.docs.length}\n`);
 
     for (const doc of snap.docs) {
       const data = doc.data();
 
-      // 🔹 Aprobar pago
+      // 🔁 Actualizar estado del pago
       await doc.ref.update({
-        status: "approved",
         mpStatus: "approved",
+        status: "approved",
         recovered: true,
         reprocessedAt: new Date().toISOString(),
       });
 
-      // 🔹 Crear chance correspondiente
+      // ⚡ Crear chance correspondiente
       await db.collection("chances").add({
         sorteoId: data.sorteoId,
         compraId: doc.id,
@@ -55,10 +53,11 @@ async function aprobarPendientes() {
       console.log(`✅ Pago aprobado y chance creado: ${doc.id}`);
     }
 
-    console.log("🎉 Todos los pagos pendientes fueron aprobados y las chances creadas.");
+    console.log("\n🎉 Todos los pagos pendientes fueron aprobados y las chances creadas.");
   } catch (err) {
     console.error("❌ Error aprobando pagos pendientes:", err.message);
   }
 }
 
+// Ejecutar script
 aprobarPendientes();
