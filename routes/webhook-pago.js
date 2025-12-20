@@ -26,32 +26,33 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 Anti duplicados
+    // 🔒 LOCK GLOBAL POR PAYMENT (idempotencia)
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     if ((await lockRef.get()).exists) {
-      console.log("⚠ Webhook duplicado:", paymentId);
+      console.log("⚠ Webhook ya procesado:", paymentId);
       return res.sendStatus(200);
     }
 
-    // ⚠ Buscar compra por external_reference (COMPRA REAL)
-    const clientTmp = new MercadoPagoConfig({
+    // 🔍 Leer pago (token 1 alcanza para leer external_reference)
+    const tmpClient = new MercadoPagoConfig({
       accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
     });
-    const paymentTmp = await new Payment(clientTmp).get({ id: paymentId });
+    const tmpPayment = await new Payment(tmpClient).get({ id: paymentId });
 
-    const compraId = paymentTmp.external_reference;
+    const compraId = tmpPayment.external_reference;
     if (!compraId) {
       console.error("❌ Pago sin external_reference:", paymentId);
       return res.sendStatus(200);
     }
 
-    const compraDoc = await db.collection("compras").doc(compraId).get();
-    if (!compraDoc.exists) {
+    const compraRef = db.collection("compras").doc(compraId);
+    const compraSnap = await compraRef.get();
+    if (!compraSnap.exists) {
       console.error("❌ Compra no encontrada:", compraId);
       return res.sendStatus(200);
     }
 
-    const compra = compraDoc.data();
+    const compra = compraSnap.data();
     const {
       sorteoId,
       cantidad = 1,
@@ -59,22 +60,33 @@ router.post("/", async (req, res) => {
       mpCuenta = "1",
     } = compra;
 
-    // 🔑 Token correcto
+    // 🔑 Token correcto según cuenta
     const client = new MercadoPagoConfig({
       accessToken: getAccessToken(mpCuenta),
     });
     const payment = await new Payment(client).get({ id: paymentId });
 
-    // 🔒 Lock definitivo
-    await lockRef.set({ processedAt: new Date() });
+    // 🧾 Actualizar compra (siempre)
+    await compraRef.update({
+      mpPaymentId: paymentId,
+      mpStatus: payment.status,
+      status: payment.status === "approved" ? "pagado" : "iniciada",
+      updatedAt: new Date().toISOString(),
+    });
 
+    // 🎟️ SOLO si está aprobado y NO existen chances
     if (payment.status === "approved") {
-      await compraDoc.ref.update({
-        status: "pagado",
-        mpStatus: "approved",
-        mpPaymentId: paymentId,
-        updatedAt: new Date().toISOString(),
-      });
+      const chancesSnap = await db
+        .collection("chances")
+        .where("mpPaymentId", "==", paymentId)
+        .limit(1)
+        .get();
+
+      if (!chancesSnap.empty) {
+        console.log("⚠ Chances ya creadas para:", paymentId);
+        await lockRef.set({ processedAt: new Date() });
+        return res.sendStatus(200);
+      }
 
       for (let i = 0; i < cantidad; i++) {
         await db.collection("chances").add({
@@ -89,14 +101,13 @@ router.post("/", async (req, res) => {
       }
 
       console.log(`🎉 ${cantidad} chances creadas (${compraId})`);
-    } else {
-      await compraDoc.ref.update({
-        status: "iniciada",
-        mpStatus: payment.status,
-        mpPaymentId: paymentId,
-        updatedAt: new Date().toISOString(),
-      });
     }
+
+    // 🔐 Cerrar lock al final (CRÍTICO)
+    await lockRef.set({
+      processedAt: new Date(),
+      paymentId,
+    });
 
     return res.sendStatus(200);
   } catch (err) {
