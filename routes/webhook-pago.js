@@ -12,10 +12,31 @@ function extractPaymentId(body) {
   return null;
 }
 
-function getAccessToken(mpCuenta = "1") {
-  return mpCuenta === "2"
-    ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
-    : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+function getClientByCuenta(mpCuenta) {
+  const token =
+    mpCuenta === "2"
+      ? process.env.MERCADOPAGO_ACCESS_TOKEN_2
+      : process.env.MERCADOPAGO_ACCESS_TOKEN_1;
+
+  return new Payment(
+    new MercadoPagoConfig({
+      accessToken: token,
+    })
+  );
+}
+
+async function getPaymentFromCuenta2First(paymentId) {
+  try {
+    const payment2 = await getClientByCuenta("2").get({ id: paymentId });
+    return { payment: payment2, mpCuenta: "2" };
+  } catch (e) {
+    try {
+      const payment1 = await getClientByCuenta("1").get({ id: paymentId });
+      return { payment: payment1, mpCuenta: "1" };
+    } catch {
+      return null;
+    }
+  }
 }
 
 router.post("/", async (req, res) => {
@@ -26,20 +47,23 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 LOCK GLOBAL POR PAYMENT (idempotencia)
+    // 🔒 LOCK GLOBAL POR PAYMENT
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     if ((await lockRef.get()).exists) {
       console.log("⚠ Webhook ya procesado:", paymentId);
       return res.sendStatus(200);
     }
 
-    // 🔍 Leer pago (token 1 alcanza para leer external_reference)
-    const tmpClient = new MercadoPagoConfig({
-      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN_1,
-    });
-    const tmpPayment = await new Payment(tmpClient).get({ id: paymentId });
+    // 🔍 Leer pago (cuenta 2 primero)
+    const result = await getPaymentFromCuenta2First(paymentId);
+    if (!result) {
+      console.warn("⏳ Payment todavía no disponible:", paymentId);
+      return res.sendStatus(200);
+    }
 
-    const compraId = tmpPayment.external_reference;
+    const { payment, mpCuenta } = result;
+
+    const compraId = payment.external_reference;
     if (!compraId) {
       console.error("❌ Pago sin external_reference:", paymentId);
       return res.sendStatus(200);
@@ -57,24 +81,18 @@ router.post("/", async (req, res) => {
       sorteoId,
       cantidad = 1,
       telefono = null,
-      mpCuenta = "1",
     } = compra;
 
-    // 🔑 Token correcto según cuenta
-    const client = new MercadoPagoConfig({
-      accessToken: getAccessToken(mpCuenta),
-    });
-    const payment = await new Payment(client).get({ id: paymentId });
-
-    // 🧾 Actualizar compra (siempre)
+    // 🧾 Actualizar compra
     await compraRef.update({
       mpPaymentId: paymentId,
       mpStatus: payment.status,
       status: payment.status === "approved" ? "pagado" : "iniciada",
+      mpCuenta,
       updatedAt: new Date().toISOString(),
     });
 
-    // 🎟️ SOLO si está aprobado y NO existen chances
+    // 🎟️ Crear chances SOLO si aprobado
     if (payment.status === "approved") {
       const chancesSnap = await db
         .collection("chances")
@@ -103,7 +121,7 @@ router.post("/", async (req, res) => {
       console.log(`🎉 ${cantidad} chances creadas (${compraId})`);
     }
 
-    // 🔐 Cerrar lock al final (CRÍTICO)
+    // 🔐 Cerrar lock
     await lockRef.set({
       processedAt: new Date(),
       paymentId,
