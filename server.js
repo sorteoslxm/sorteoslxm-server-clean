@@ -11,7 +11,7 @@ import comprasRoutes from "./routes/compras.js";
 import chancesRoutes from "./routes/chances.js";
 import webhookRoutes from "./routes/webhook-pago.js";
 import mercadopagoRoutes from "./routes/mercadopago.js";
-
+import cajasRoutes from "./routes/cajas.js";
 dotenv.config();
 
 const app = express();
@@ -88,7 +88,7 @@ app.use("/banners", bannersRoutes);
 app.use("/compras", comprasRoutes);
 app.use("/chances", chancesRoutes);
 app.use("/mercadopago", mercadopagoRoutes);
-
+app.use("/cajas", cajasRoutes);
 /* ================================
    🚀 SERVIDOR
 ================================= */
