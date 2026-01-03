@@ -5,7 +5,7 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ================================
-   📦 OBTENER CAJAS ACTIVAS Y VISIBLES
+   📦 OBTENER CAJAS ACTIVAS
    GET /cajas
 ================================= */
 router.get("/", async (req, res) => {
@@ -13,7 +13,6 @@ router.get("/", async (req, res) => {
     const snap = await db
       .collection("cajas")
       .where("estado", "==", "activa")
-      .where("visible", "==", true)
       .orderBy("createdAt", "desc")
       .get();
 

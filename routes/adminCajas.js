@@ -1,3 +1,4 @@
+// FILE: routes/adminCajas.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
@@ -5,6 +6,7 @@ const router = express.Router();
 
 /* ================================
    📦 ADMIN · LISTAR TODAS LAS CAJAS
+   GET /admin/cajas
 ================================= */
 router.get("/", async (req, res) => {
   try {
@@ -26,7 +28,30 @@ router.get("/", async (req, res) => {
 });
 
 /* ================================
+   📦 ADMIN · OBTENER CAJA POR ID
+   GET /admin/cajas/:id
+================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const doc = await db.collection("cajas").doc(req.params.id).get();
+
+    if (!doc.exists) {
+      return res.status(404).json(null);
+    }
+
+    res.json({
+      id: doc.id,
+      ...doc.data(),
+    });
+  } catch (error) {
+    console.error("❌ Admin caja GET by ID:", error);
+    res.status(500).json(null);
+  }
+});
+
+/* ================================
    ➕ ADMIN · CREAR CAJA
+   POST /admin/cajas
 ================================= */
 router.post("/", async (req, res) => {
   try {
@@ -48,6 +73,7 @@ router.post("/", async (req, res) => {
 
 /* ================================
    🔒 ADMIN · CERRAR CAJA
+   PUT /admin/cajas/:id/cerrar
 ================================= */
 router.put("/:id/cerrar", async (req, res) => {
   try {
