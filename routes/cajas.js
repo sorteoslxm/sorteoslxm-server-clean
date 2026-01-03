@@ -5,13 +5,15 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ================================
-   📦 OBTENER CAJAS ACTIVAS
+   📦 OBTENER CAJAS ACTIVAS Y VISIBLES
+   GET /cajas
 ================================= */
 router.get("/", async (req, res) => {
   try {
     const snap = await db
       .collection("cajas")
       .where("estado", "==", "activa")
+      .where("visible", "==", true)
       .orderBy("createdAt", "desc")
       .get();
 
@@ -29,7 +31,7 @@ router.get("/", async (req, res) => {
 
 /* ================================
    📦 OBTENER CAJA POR SLUG
-   /cajas/100k
+   GET /cajas/:slug
 ================================= */
 router.get("/:slug", async (req, res) => {
   try {
@@ -44,7 +46,10 @@ router.get("/:slug", async (req, res) => {
     }
 
     const doc = snap.docs[0];
-    res.json({ id: doc.id, ...doc.data() });
+    res.json({
+      id: doc.id,
+      ...doc.data(),
+    });
   } catch (error) {
     console.error("❌ Error obteniendo caja:", error);
     res.status(500).json(null);
