@@ -7,6 +7,7 @@ const router = express.Router();
 /* ================================
    📦 OBTENER CAJAS ACTIVAS
    GET /cajas
+   👉 Se muestran solo las cajas activas
 ================================= */
 router.get("/", async (req, res) => {
   try {
@@ -31,6 +32,7 @@ router.get("/", async (req, res) => {
 /* ================================
    📦 OBTENER CAJA POR SLUG
    GET /cajas/:slug
+   👉 Usado por /cajas/100k
 ================================= */
 router.get("/:slug", async (req, res) => {
   try {
@@ -45,6 +47,7 @@ router.get("/:slug", async (req, res) => {
     }
 
     const doc = snap.docs[0];
+
     res.json({
       id: doc.id,
       ...doc.data(),
