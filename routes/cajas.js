@@ -13,7 +13,6 @@ router.get("/", async (req, res) => {
     const snap = await db
       .collection("cajas")
       .where("estado", "==", "activa")
-      .orderBy("createdAt", "desc")
       .get();
 
     const cajas = snap.docs.map((doc) => ({
