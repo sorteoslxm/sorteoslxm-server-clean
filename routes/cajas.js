@@ -5,47 +5,53 @@ import { db } from "../config/firebase.js";
 const router = express.Router();
 
 /* ================================
-   📦 OBTENER CAJAS (ACTIVAS)
+   📦 PUBLIC · LISTAR CAJAS ACTIVAS
    GET /cajas
 ================================= */
 router.get("/", async (req, res) => {
   try {
-    const snap = await db.collection("cajas").get();
+    const snap = await db
+      .collection("cajas")
+      .where("estado", "==", "activa")
+      .orderBy("createdAt", "desc")
+      .get();
 
-    const cajas = snap.docs
-      .map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }))
-      .filter(caja => caja.estado === "activa");
+    const cajas = snap.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
     res.json(cajas);
   } catch (error) {
     console.error("❌ Error obteniendo cajas:", error);
-    res.status(500).json({ error: "Error obteniendo cajas" });
+    res.status(500).json([]);
   }
 });
 
 /* ================================
-   📦 OBTENER CAJA POR SLUG
-   GET /cajas/:slug
+   📦 PUBLIC · OBTENER CAJA POR ID
+   GET /cajas/:id
 ================================= */
-router.get("/:slug", async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
-    const snap = await db
+    const doc = await db
       .collection("cajas")
-      .where("slug", "==", req.params.slug)
-      .limit(1)
+      .doc(req.params.id)
       .get();
 
-    if (snap.empty) {
+    if (!doc.exists) {
       return res.status(404).json(null);
     }
 
-    const doc = snap.docs[0];
+    const data = doc.data();
+
+    if (data.estado !== "activa") {
+      return res.status(404).json(null);
+    }
+
     res.json({
       id: doc.id,
-      ...doc.data(),
+      ...data,
     });
   } catch (error) {
     console.error("❌ Error obteniendo caja:", error);
