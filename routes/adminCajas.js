@@ -15,7 +15,7 @@ router.get("/", async (req, res) => {
       .orderBy("createdAt", "desc")
       .get();
 
-    const cajas = snap.docs.map(doc => ({
+    const cajas = snap.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
@@ -57,8 +57,10 @@ router.post("/", async (req, res) => {
   try {
     const data = {
       ...req.body,
+
       estado: "activa",
       cajasVendidas: 0,
+
       createdAt: new Date(),
     };
 
@@ -67,6 +69,24 @@ router.post("/", async (req, res) => {
     res.json({ id: ref.id });
   } catch (error) {
     console.error("❌ Admin cajas POST:", error);
+    res.status(500).json({ error: true });
+  }
+});
+
+/* ================================
+   ✏️ ADMIN · EDITAR CAJA
+   PUT /admin/cajas/:id
+================================= */
+router.put("/:id", async (req, res) => {
+  try {
+    await db.collection("cajas").doc(req.params.id).update({
+      ...req.body,
+      updatedAt: new Date(),
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("❌ Admin cajas PUT:", error);
     res.status(500).json({ error: true });
   }
 });

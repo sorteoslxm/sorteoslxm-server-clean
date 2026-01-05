@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 import sorteosRoutes from "./routes/sorteos.js";
 import adminRoutes from "./routes/admin.js";
 import adminCajasRoutes from "./routes/adminCajas.js";
+import adminPacksRoutes from "./routes/adminPacks.js"; // 👈 NUEVO
 import bannersRoutes from "./routes/banners.js";
 import comprasRoutes from "./routes/compras.js";
 import chancesRoutes from "./routes/chances.js";
@@ -26,11 +27,7 @@ const app = express();
 const allowedOrigins = [
   "https://sorteoslxm.com",
   "https://www.sorteoslxm.com",
-
-  // Vercel
   "https://sorteos-lxm.vercel.app",
-
-  // Local
   "http://localhost:3000",
   "http://localhost:5173",
 ];
@@ -38,7 +35,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Permitir requests sin origin (webhooks, Postman, etc)
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
@@ -54,7 +50,6 @@ app.use(
 
 /* ==========================================
    ⚠️ WEBHOOK MERCADOPAGO
-   ⚠️ RAW BODY — DEBE IR ANTES DE express.json()
 ========================================== */
 app.use(
   "/webhook-pago",
@@ -63,12 +58,12 @@ app.use(
 );
 
 /* ================================
-   JSON NORMAL
+   JSON
 ================================= */
 app.use(express.json());
 
 /* ================================
-   ❤️ HEALTH CHECK
+   ❤️ HEALTH
 ================================= */
 app.get("/health", (req, res) => {
   res.status(200).send("ok");
@@ -86,12 +81,13 @@ app.get("/", (req, res) => {
 ================================= */
 app.use("/sorteos", sorteosRoutes);
 app.use("/admin", adminRoutes);
-app.use("/admin/cajas", adminCajasRoutes); // 👈 ADMIN CAJAS (NUEVO)
+app.use("/admin/cajas", adminCajasRoutes);
+app.use("/admin/packs", adminPacksRoutes); // 👈 ACÁ
 app.use("/banners", bannersRoutes);
 app.use("/compras", comprasRoutes);
 app.use("/chances", chancesRoutes);
 app.use("/mercadopago", mercadopagoRoutes);
-app.use("/cajas", cajasRoutes); // 👈 PUBLICO
+app.use("/cajas", cajasRoutes);
 
 /* ================================
    🚀 SERVER
