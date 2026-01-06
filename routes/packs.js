@@ -20,7 +20,6 @@ router.get("/activos/:cajaId", async (req, res) => {
       .collection("packs")
       .where("cajaId", "==", cajaId)
       .where("activo", "==", true)
-      .orderBy("orden", "asc")
       .get();
 
     const packs = snap.docs.map(doc => ({
