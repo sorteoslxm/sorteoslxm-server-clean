@@ -14,8 +14,8 @@ router.get("/activos/:cajaId", async (req, res) => {
     const snap = await db
       .collection("packs")
       .where("cajaId", "==", cajaId)
-      .where("estado", "==", "activo")
-      .orderBy("precio", "asc")
+      .where("estado", "==", true) // 👈 FIX CLAVE (boolean)
+      .orderBy("orden", "asc")     // 👈 mejor que precio si usás orden
       .get();
 
     const packs = snap.docs.map((doc) => ({
@@ -25,7 +25,7 @@ router.get("/activos/:cajaId", async (req, res) => {
 
     res.json(packs);
   } catch (error) {
-    console.error("❌ Packs activos:", error);
+    console.error("❌ Packs activos públicos:", error);
     res.status(500).json([]);
   }
 });
