@@ -13,19 +13,20 @@ router.get("/", async (req, res) => {
     const { cajaId } = req.query;
 
     if (!cajaId) {
-      return res.status(400).json([]);
+      return res.json([]);
     }
 
     const snap = await db
       .collection("packs")
       .where("cajaId", "==", cajaId)
-      .orderBy("orden", "asc")
       .get();
 
-    const packs = snap.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const packs = snap.docs
+      .map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
 
     res.json(packs);
   } catch (error) {
@@ -45,7 +46,7 @@ router.post("/", async (req, res) => {
       cantidad,
       precio,
       destacado = false,
-      orden = 1,
+      orden = 0,
       activo = true,
     } = req.body;
 
@@ -78,13 +79,7 @@ router.post("/", async (req, res) => {
 ===================================== */
 router.put("/:id", async (req, res) => {
   try {
-    const {
-      cantidad,
-      precio,
-      destacado,
-      orden,
-      activo,
-    } = req.body;
+    const { cantidad, precio, destacado, orden, activo } = req.body;
 
     const data = {
       ...(cantidad !== undefined && { cantidad: Number(cantidad) }),
@@ -106,8 +101,6 @@ router.put("/:id", async (req, res) => {
 
 /* =====================================
    ❌ ADMIN · DESACTIVAR PACK
-   DELETE /admin/packs/:id
-   (NO borra, solo apaga)
 ===================================== */
 router.delete("/:id", async (req, res) => {
   try {
