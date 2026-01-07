@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 ================================ */
 import sorteosRoutes from "./routes/sorteos.js";
 import cajasRoutes from "./routes/cajas.js";
-import packsRoutes from "./routes/packs.js"; // 👈 PUBLICO (FALTABA)
+import packsRoutes from "./routes/packs.js"; // 👈 PUBLICO
 
 import adminRoutes from "./routes/admin.js";
 import adminCajasRoutes from "./routes/adminCajas.js";
@@ -25,7 +25,7 @@ dotenv.config();
 const app = express();
 
 /* ================================
-   🔵 CORS
+   🔵 CORS (FIX PRODUCCIÓN)
 ================================ */
 const allowedOrigins = [
   "https://sorteoslxm.com",
@@ -38,12 +38,21 @@ const allowedOrigins = [
 app.use(
   cors({
     origin(origin, callback) {
+      // requests server-to-server o curl
       if (!origin) return callback(null, true);
+
+      // dominios explícitos
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
+
+      // 🔥 cualquier deploy de Vercel
+      if (origin.endsWith(".vercel.app")) {
+        return callback(null, true);
+      }
+
       console.error("❌ Bloqueado por CORS:", origin);
-      callback(new Error("Not allowed by CORS"));
+      return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
   })
@@ -82,7 +91,7 @@ app.get("/", (_, res) => {
 ================================ */
 app.use("/sorteos", sorteosRoutes);
 app.use("/cajas", cajasRoutes);
-app.use("/packs", packsRoutes); // 👈 ESTA ERA CLAVE
+app.use("/packs", packsRoutes);
 
 /* ================================
    🔐 RUTAS ADMIN
