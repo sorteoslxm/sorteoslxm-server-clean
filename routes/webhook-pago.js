@@ -47,14 +47,18 @@ router.post("/", async (req, res) => {
     const paymentId = extractPaymentId(body);
     if (!paymentId) return res.sendStatus(200);
 
-    // 🔒 LOCK GLOBAL POR PAYMENT
+    /* ================================
+       🔒 LOCK GLOBAL POR PAYMENT
+    ================================ */
     const lockRef = db.collection("mpLocks").doc(paymentId.toString());
     if ((await lockRef.get()).exists) {
       console.log("⚠ Webhook ya procesado:", paymentId);
       return res.sendStatus(200);
     }
 
-    // 🔍 Leer pago (cuenta 2 primero)
+    /* ================================
+       🔍 LEER PAGO (CUENTA 2 → 1)
+    ================================ */
     const result = await getPaymentFromCuenta2First(paymentId);
     if (!result) {
       console.warn("⏳ Payment todavía no disponible:", paymentId);
@@ -63,16 +67,45 @@ router.post("/", async (req, res) => {
 
     const { payment, mpCuenta } = result;
 
+    /* ==================================================
+       🎁 CASO CAJAS (NO INTERFIERE CON SORTEOS)
+    ================================================== */
+    const cajaId = payment.metadata?.cajaId;
+
+    if (payment.status === "approved" && cajaId) {
+      const yaExiste = await db
+        .collection("pagosCajas")
+        .where("paymentId", "==", paymentId)
+        .limit(1)
+        .get();
+
+      if (yaExiste.empty) {
+        await db.collection("pagosCajas").add({
+          paymentId,
+          cajaId,
+          estado: "approved",
+          usado: false,
+          mpCuenta,
+          createdAt: new Date(),
+        });
+
+        console.log("🎁 Pago de caja registrado:", cajaId);
+      }
+    }
+
+    /* ==================================================
+       🎟️ FLUJO ORIGINAL DE SORTEOS (INTACTO)
+    ================================================== */
     const compraId = payment.external_reference;
     if (!compraId) {
-      console.error("❌ Pago sin external_reference:", paymentId);
+      await lockRef.set({ processedAt: new Date() });
       return res.sendStatus(200);
     }
 
     const compraRef = db.collection("compras").doc(compraId);
     const compraSnap = await compraRef.get();
     if (!compraSnap.exists) {
-      console.error("❌ Compra no encontrada:", compraId);
+      await lockRef.set({ processedAt: new Date() });
       return res.sendStatus(200);
     }
 
@@ -83,7 +116,6 @@ router.post("/", async (req, res) => {
       telefono = null,
     } = compra;
 
-    // 🧾 Actualizar compra
     await compraRef.update({
       mpPaymentId: paymentId,
       mpStatus: payment.status,
@@ -92,7 +124,6 @@ router.post("/", async (req, res) => {
       updatedAt: new Date().toISOString(),
     });
 
-    // 🎟️ Crear chances SOLO si aprobado
     if (payment.status === "approved") {
       const chancesSnap = await db
         .collection("chances")
@@ -100,28 +131,26 @@ router.post("/", async (req, res) => {
         .limit(1)
         .get();
 
-      if (!chancesSnap.empty) {
-        console.log("⚠ Chances ya creadas para:", paymentId);
-        await lockRef.set({ processedAt: new Date() });
-        return res.sendStatus(200);
-      }
+      if (chancesSnap.empty) {
+        for (let i = 0; i < cantidad; i++) {
+          await db.collection("chances").add({
+            sorteoId,
+            compraId,
+            telefono,
+            mpPaymentId: paymentId,
+            mpCuenta,
+            mpStatus: "approved",
+            createdAt: new Date().toISOString(),
+          });
+        }
 
-      for (let i = 0; i < cantidad; i++) {
-        await db.collection("chances").add({
-          sorteoId,
-          compraId,
-          telefono,
-          mpPaymentId: paymentId,
-          mpCuenta,
-          mpStatus: "approved",
-          createdAt: new Date().toISOString(),
-        });
+        console.log(`🎉 ${cantidad} chances creadas (${compraId})`);
       }
-
-      console.log(`🎉 ${cantidad} chances creadas (${compraId})`);
     }
 
-    // 🔐 Cerrar lock
+    /* ================================
+       🔐 CERRAR LOCK
+    ================================ */
     await lockRef.set({
       processedAt: new Date(),
       paymentId,

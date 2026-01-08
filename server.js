@@ -7,8 +7,9 @@ import dotenv from "dotenv";
    📦 IMPORT ROUTES
 ================================ */
 import sorteosRoutes from "./routes/sorteos.js";
-import cajasRoutes from "./routes/cajas.js";
-import packsRoutes from "./routes/packs.js"; // 👈 PUBLICO
+import cajasRoutes from "./routes/cajas.js"; // 👈 CAJAS (PÚBLICO)
+import cajasPagoRoutes from "./routes/cajasPago.js"; // 👈 PAGO CAJAS (NUEVO)
+import packsRoutes from "./routes/packs.js"; // 👈 PACKS (PÚBLICO)
 
 import adminRoutes from "./routes/admin.js";
 import adminCajasRoutes from "./routes/adminCajas.js";
@@ -38,15 +39,12 @@ const allowedOrigins = [
 app.use(
   cors({
     origin(origin, callback) {
-      // requests server-to-server o curl
       if (!origin) return callback(null, true);
 
-      // dominios explícitos
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      // 🔥 cualquier deploy de Vercel
       if (origin.endsWith(".vercel.app")) {
         return callback(null, true);
       }
@@ -59,7 +57,7 @@ app.use(
 );
 
 /* ================================
-   ⚠️ WEBHOOK MP (RAW)
+   ⚠️ WEBHOOK MP (RAW BODY)
 ================================ */
 app.use(
   "/webhook-pago",
@@ -73,7 +71,7 @@ app.use(
 app.use(express.json());
 
 /* ================================
-   ❤️ HEALTH
+   ❤️ HEALTH CHECK
 ================================ */
 app.get("/health", (_, res) => {
   res.status(200).send("ok");
@@ -90,7 +88,8 @@ app.get("/", (_, res) => {
    🌍 RUTAS PÚBLICAS
 ================================ */
 app.use("/sorteos", sorteosRoutes);
-app.use("/cajas", cajasRoutes);
+app.use("/cajas", cajasRoutes);      // 👈 cajas (listar / abrir)
+app.use("/cajas", cajasPagoRoutes);  // 👈 pago de cajas
 app.use("/packs", packsRoutes);
 
 /* ================================
@@ -99,6 +98,7 @@ app.use("/packs", packsRoutes);
 app.use("/admin", adminRoutes);
 app.use("/admin/cajas", adminCajasRoutes);
 app.use("/admin/packs", adminPacksRoutes);
+
 app.use("/banners", bannersRoutes);
 app.use("/compras", comprasRoutes);
 app.use("/chances", chancesRoutes);
@@ -108,6 +108,7 @@ app.use("/mercadopago", mercadopagoRoutes);
    🚀 SERVER
 ================================ */
 const PORT = process.env.PORT || 4000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor en puerto ${PORT}`);
 });
