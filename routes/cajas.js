@@ -34,21 +34,11 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const doc = await db.collection("cajas").doc(req.params.id).get();
-
-    if (!doc.exists) {
+    if (!doc.exists || doc.data().estado !== "activa") {
       return res.status(404).json(null);
     }
 
-    const data = doc.data();
-
-    if (data.estado !== "activa") {
-      return res.status(404).json(null);
-    }
-
-    res.json({
-      id: doc.id,
-      ...data,
-    });
+    res.json({ id: doc.id, ...doc.data() });
   } catch (error) {
     console.error("❌ Error obteniendo caja:", error);
     res.status(500).json(null);
@@ -56,18 +46,36 @@ router.get("/:id", async (req, res) => {
 });
 
 /* ================================
-   🎁 PUBLIC · ABRIR CAJA (WIN / LOSE)
+   🎁 PUBLIC · ABRIR CAJA
    POST /cajas/abrir
 ================================= */
 router.post("/abrir", async (req, res) => {
   try {
-    const { cajaId, userId, openToken } = req.body;
-
+    const { cajaId } = req.body;
     if (!cajaId) {
       return res.status(400).json({ error: "Caja requerida" });
     }
 
-    /* 📦 validar caja */
+    /* ================================
+       🔐 VALIDAR PAGO APROBADO
+    ================================ */
+    const pagoSnap = await db
+      .collection("pagosCajas")
+      .where("cajaId", "==", cajaId)
+      .where("estado", "==", "approved")
+      .where("usado", "==", false)
+      .limit(1)
+      .get();
+
+    if (pagoSnap.empty) {
+      return res.status(403).json({ error: "Pago no aprobado" });
+    }
+
+    const pagoRef = pagoSnap.docs[0].ref;
+
+    /* ================================
+       📦 VALIDAR CAJA + STOCK
+    ================================ */
     const cajaRef = db.collection("cajas").doc(cajaId);
     const cajaSnap = await cajaRef.get();
 
@@ -75,56 +83,49 @@ router.post("/abrir", async (req, res) => {
       return res.status(404).json({ error: "Caja no disponible" });
     }
 
-    /* 🔒 validación token anti-refresh (opcional) */
-    if (openToken) {
-      const tokenRef = db.collection("openTokens").doc(openToken);
-      const tokenSnap = await tokenRef.get();
-
-      if (!tokenSnap.exists || tokenSnap.data().usado) {
-        return res.status(403).json({ error: "Caja ya abierta" });
-      }
-
-      await tokenRef.update({ usado: true });
+    if ((cajaSnap.data().stock ?? 0) <= 0) {
+      return res.status(400).json({ error: "Sin stock" });
     }
 
-    /* 🎯 traer premios */
+    /* ================================
+       🎯 PREMIOS
+    ================================ */
     const premiosSnap = await cajaRef.collection("premios").get();
-
-    const premios = premiosSnap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    }));
+    const premios = premiosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     let premioGanado = null;
-
     if (premios.length) {
       const roll = Math.random() * 100;
-      let acumulado = 0;
-
-      for (const premio of premios) {
-        acumulado += Number(premio.probabilidad || 0);
-        if (roll <= acumulado) {
-          premioGanado = premio;
+      let acc = 0;
+      for (const p of premios) {
+        acc += Number(p.probabilidad || 0);
+        if (roll <= acc) {
+          premioGanado = p;
           break;
         }
       }
     }
 
-    /* 📝 log apertura */
-    await db.collection("aperturas").add({
-      cajaId,
-      userId: userId || null,
-      win: !!premioGanado,
-      premio: premioGanado || null,
-      createdAt: new Date(),
+    /* ================================
+       🔥 TRANSACTION FINAL
+    ================================ */
+    await db.runTransaction(async (t) => {
+      t.update(pagoRef, { usado: true, usadoAt: new Date() });
+      t.update(cajaRef, { stock: cajaSnap.data().stock - 1 });
+
+      t.set(db.collection("aperturas").doc(), {
+        cajaId,
+        win: !!premioGanado,
+        premio: premioGanado || null,
+        createdAt: new Date(),
+      });
     });
 
-    /* 📤 respuesta final */
+    /* ================================
+       📤 RESPUESTA
+    ================================ */
     if (!premioGanado) {
-      return res.json({
-        win: false,
-        premio: null,
-      });
+      return res.json({ win: false });
     }
 
     res.json({
