@@ -4,10 +4,14 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* Listar compras (admin) */
+/* 🧾 Listar compras (admin) */
 router.get("/", async (req, res) => {
   try {
-    const snap = await db.collection("compras").orderBy("createdAt", "desc").get();
+    const snap = await db
+      .collection("compras")
+      .orderBy("createdAt", "desc")
+      .get();
+
     const lista = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     res.json(lista);
   } catch (err) {
@@ -16,32 +20,30 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* Crear compra preliminar (si quieres usar este endpoint desde frontend en lugar del que crea preferencia) */
-router.post("/crear", async (req, res) => {
+/* ➕ Crear compra manual (transferencia) */
+router.post("/", async (req, res) => {
   try {
-    const { sorteoId, telefono, nombre, email, cantidad, mpPreferenceId, mpAccount } = req.body;
+    const { sorteoId, telefono, cantidad, precio, aliasPago } = req.body;
 
-    if (!sorteoId || !telefono || !cantidad) {
-      return res.status(400).json({ error: "Faltan datos requeridos" });
+    if (!sorteoId || !telefono || !cantidad || !precio) {
+      return res.status(400).json({ error: "Datos incompletos" });
     }
 
-    const compraRef = await db.collection("compras").add({
+    const ref = await db.collection("compras").add({
       sorteoId,
       telefono,
-      nombre: nombre || null,
-      email: email || null,
-      cantidad: Number(cantidad || 1),
-      mpPreferenceId: mpPreferenceId || null,
-      mpAccount: mpAccount || null,
-      status: "pending",
+      cantidad: Number(cantidad),
+      precio: Number(precio),
+      aliasPago,
+      metodo: "transferencia",
+      estado: "pendiente",
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     });
 
-    res.json({ ok: true, compraId: compraRef.id });
+    res.json({ ok: true, compraId: ref.id });
   } catch (err) {
-    console.error("POST /compras/crear ERROR:", err);
-    res.status(500).json({ error: "Error interno" });
+    console.error("POST /compras ERROR:", err);
+    res.status(500).json({ error: "Error creando compra" });
   }
 });
 

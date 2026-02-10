@@ -1,11 +1,10 @@
 // FILE: routes/sorteos.js
-// FILE: routes/sorteos.js
 import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
-/* 🟦 Obtener todos los sorteos (excluye eliminados SIN índice) */
+/* 🟦 Obtener todos los sorteos */
 router.get("/", async (req, res) => {
   try {
     const snap = await db
@@ -32,6 +31,8 @@ router.get("/", async (req, res) => {
 
           return {
             ...sorteo,
+            ofertas: sorteo.ofertas || [],
+            aliasPago: sorteo.aliasPago || "",
             chancesVendidas,
             chancesDisponibles,
             cerrado: chancesDisponibles <= 0,
@@ -46,11 +47,11 @@ router.get("/", async (req, res) => {
   }
 });
 
-/* 🟨 Obtener un sorteo por ID (si no está eliminado) */
+/* 🟨 Obtener sorteo por ID */
 router.get("/:id", async (req, res) => {
   try {
-    const docRef = db.collection("sorteos").doc(req.params.id);
-    const doc = await docRef.get();
+    const ref = db.collection("sorteos").doc(req.params.id);
+    const doc = await ref.get();
 
     if (!doc.exists || doc.data()?.eliminado === true) {
       return res.status(404).json({ error: "Sorteo no encontrado" });
@@ -72,6 +73,8 @@ router.get("/:id", async (req, res) => {
 
     res.json({
       ...sorteo,
+      ofertas: sorteo.ofertas || [],
+      aliasPago: sorteo.aliasPago || "",
       chancesVendidas,
       chancesDisponibles,
       cerrado: chancesDisponibles <= 0,
@@ -85,78 +88,23 @@ router.get("/:id", async (req, res) => {
 /* 🟩 Editar sorteo */
 router.put("/:id", async (req, res) => {
   try {
-    const id = req.params.id;
-    let data = { ...req.body };
+    const data = { ...req.body };
 
-    Object.keys(data).forEach((key) => {
-      if (data[key] === undefined || data[key] === null) delete data[key];
-    });
-
-    if (data.precio !== undefined) data.precio = Number(data.precio);
-    if (data.numerosTotales !== undefined)
-      data.numerosTotales = Number(data.numerosTotales);
-    if (data.activarAutoUltimas !== undefined)
-      data.activarAutoUltimas = Number(data.activarAutoUltimas);
+    if (Array.isArray(data.ofertas)) {
+      data.ofertas = data.ofertas.map((o) => ({
+        cantidad: Number(o.cantidad),
+        precio: Number(o.precio),
+      }));
+    }
 
     data.editedAt = new Date().toISOString();
 
-    const docRef = db.collection("sorteos").doc(id);
-    await docRef.update(data);
-
-    const updated = await docRef.get();
-    res.json({ ok: true, id: updated.id, ...updated.data() });
-  } catch (e) {
-    console.error("PUT /sorteos ERROR:", e);
-    res.status(500).json({ error: "Error al editar sorteo" });
-  }
-});
-
-/* 🟩 Crear nuevo sorteo */
-router.post("/", async (req, res) => {
-  try {
-    let data = { ...req.body };
-
-    Object.keys(data).forEach((key) => {
-      if (data[key] === undefined || data[key] === null) delete data[key];
-    });
-
-    if (data.precio !== undefined) data.precio = Number(data.precio);
-    if (data.numerosTotales !== undefined)
-      data.numerosTotales = Number(data.numerosTotales);
-
-    const docRef = await db.collection("sorteos").add({
-      ...data,
-      eliminado: false,
-      createdAt: new Date().toISOString(),
-    });
-
-    res.json({ ok: true, id: docRef.id });
-  } catch (e) {
-    console.error("POST /sorteos ERROR:", e);
-    res.status(500).json({ error: "Error al crear sorteo" });
-  }
-});
-
-/* 🟥 Eliminar sorteo (soft delete) */
-router.delete("/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    const ref = db.collection("sorteos").doc(id);
-    const snap = await ref.get();
-
-    if (!snap.exists) {
-      return res.status(404).json({ error: "Sorteo no encontrado" });
-    }
-
-    await ref.update({
-      eliminado: true,
-      eliminadoAt: new Date().toISOString(),
-    });
+    await db.collection("sorteos").doc(req.params.id).update(data);
 
     res.json({ ok: true });
   } catch (e) {
-    console.error("DELETE /sorteos ERROR:", e);
-    res.status(500).json({ error: "Error eliminando sorteo" });
+    console.error("PUT /sorteos ERROR:", e);
+    res.status(500).json({ error: "Error editando sorteo" });
   }
 });
 
