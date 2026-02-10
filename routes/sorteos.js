@@ -31,7 +31,7 @@ router.get("/", async (req, res) => {
 
           return {
             ...sorteo,
-            ofertas: sorteo.ofertas || [],
+            ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
             aliasPago: sorteo.aliasPago || "",
             chancesVendidas,
             chancesDisponibles,
@@ -73,7 +73,7 @@ router.get("/:id", async (req, res) => {
 
     res.json({
       ...sorteo,
-      ofertas: sorteo.ofertas || [],
+      ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
       aliasPago: sorteo.aliasPago || "",
       chancesVendidas,
       chancesDisponibles,
@@ -90,10 +90,14 @@ router.put("/:id", async (req, res) => {
   try {
     const data = { ...req.body };
 
+    // ✅ Normalizamos ofertas SIN perder campos
     if (Array.isArray(data.ofertas)) {
       data.ofertas = data.ofertas.map((o) => ({
+        nombre: o.nombre || "",
         cantidad: Number(o.cantidad),
         precio: Number(o.precio),
+        orden: Number(o.orden || 0),
+        destacado: Boolean(o.destacado),
       }));
     }
 
