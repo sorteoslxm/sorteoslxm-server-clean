@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 ================================ */
 import sorteosRoutes from "./routes/sorteos.js";
 import cajasRoutes from "./routes/cajas.js"; // 👈 CAJAS (PÚBLICO)
-import cajasPagoRoutes from "./routes/cajasPago.js"; // 👈 PAGO CAJAS (NUEVO)
+import cajasPagoRoutes from "./routes/cajasPago.js"; // 👈 PAGO CAJAS
 import packsRoutes from "./routes/packs.js"; // 👈 PACKS (PÚBLICO)
 
 import adminRoutes from "./routes/admin.js";
@@ -16,10 +16,12 @@ import adminCajasRoutes from "./routes/adminCajas.js";
 import adminPacksRoutes from "./routes/adminPacks.js";
 
 import bannersRoutes from "./routes/banners.js";
-import comprasRoutes from "./routes/compras.js";
-import chancesRoutes from "./routes/chances.js";
-import webhookRoutes from "./routes/webhook-pago.js";
-import mercadopagoRoutes from "./routes/mercadopago.js";
+
+// ❌ DESACTIVADO – COMPRAS / MP
+// import comprasRoutes from "./routes/compras.js";
+// import chancesRoutes from "./routes/chances.js";
+// import webhookRoutes from "./routes/webhook-pago.js";
+// import mercadopagoRoutes from "./routes/mercadopago.js";
 
 dotenv.config();
 
@@ -57,13 +59,13 @@ app.use(
 );
 
 /* ================================
-   ⚠️ WEBHOOK MP (RAW BODY)
+   ⚠️ WEBHOOK MP (DESACTIVADO)
 ================================ */
-app.use(
-  "/webhook-pago",
-  express.raw({ type: "*/*" }),
-  webhookRoutes
-);
+// app.use(
+//   "/webhook-pago",
+//   express.raw({ type: "*/*" }),
+//   webhookRoutes
+// );
 
 /* ================================
    JSON
@@ -100,9 +102,11 @@ app.use("/admin/cajas", adminCajasRoutes);
 app.use("/admin/packs", adminPacksRoutes);
 
 app.use("/banners", bannersRoutes);
-app.use("/compras", comprasRoutes);
-app.use("/chances", chancesRoutes);
-app.use("/mercadopago", mercadopagoRoutes);
+
+// ❌ DESACTIVADO – COMPRAS / MP
+// app.use("/compras", comprasRoutes);
+// app.use("/chances", chancesRoutes);
+// app.use("/mercadopago", mercadopagoRoutes);
 
 /* ================================
    🚀 SERVER

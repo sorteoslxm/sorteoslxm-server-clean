@@ -6,7 +6,6 @@ const router = express.Router();
 
 /* ================================
    📦 PUBLIC · LISTAR CAJAS ACTIVAS
-   GET /cajas
 ================================= */
 router.get("/", async (req, res) => {
   try {
@@ -15,33 +14,12 @@ router.get("/", async (req, res) => {
       .where("estado", "==", "activa")
       .get();
 
-    const cajas = snap.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    res.json(cajas);
-  } catch (error) {
-    console.error("❌ Error obteniendo cajas:", error);
+    res.json(
+      snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    );
+  } catch (e) {
+    console.error(e);
     res.status(500).json([]);
-  }
-});
-
-/* ================================
-   📦 PUBLIC · OBTENER CAJA POR ID
-   GET /cajas/:id
-================================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const doc = await db.collection("cajas").doc(req.params.id).get();
-    if (!doc.exists || doc.data().estado !== "activa") {
-      return res.status(404).json(null);
-    }
-
-    res.json({ id: doc.id, ...doc.data() });
-  } catch (error) {
-    console.error("❌ Error obteniendo caja:", error);
-    res.status(500).json(null);
   }
 });
 
@@ -51,30 +29,34 @@ router.get("/:id", async (req, res) => {
 ================================= */
 router.post("/abrir", async (req, res) => {
   try {
-    const { cajaId } = req.body;
-    if (!cajaId) {
-      return res.status(400).json({ error: "Caja requerida" });
+    const { cajaId, pagoId } = req.body;
+
+    if (!cajaId || !pagoId) {
+      return res.status(400).json({ error: "Datos incompletos" });
     }
 
     /* ================================
-       🔐 VALIDAR PAGO APROBADO
+       🔐 VALIDAR PAGO
     ================================ */
-    const pagoSnap = await db
-      .collection("pagosCajas")
-      .where("cajaId", "==", cajaId)
-      .where("estado", "==", "approved")
-      .where("usado", "==", false)
-      .limit(1)
-      .get();
+    const pagoRef = db.collection("pagosCajas").doc(pagoId);
+    const pagoSnap = await pagoRef.get();
 
-    if (pagoSnap.empty) {
-      return res.status(403).json({ error: "Pago no aprobado" });
+    if (!pagoSnap.exists) {
+      return res.status(403).json({ error: "Pago inexistente" });
     }
 
-    const pagoRef = pagoSnap.docs[0].ref;
+    const pago = pagoSnap.data();
+
+    if (pago.estado !== "approved" || pago.usado) {
+      return res.status(403).json({ error: "Pago no válido" });
+    }
+
+    if (pago.cajaId !== cajaId) {
+      return res.status(403).json({ error: "Pago no corresponde a la caja" });
+    }
 
     /* ================================
-       📦 VALIDAR CAJA + STOCK
+       📦 VALIDAR CAJA
     ================================ */
     const cajaRef = db.collection("cajas").doc(cajaId);
     const cajaSnap = await cajaRef.get();
@@ -94,20 +76,19 @@ router.post("/abrir", async (req, res) => {
     const premios = premiosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     let premioGanado = null;
-    if (premios.length) {
-      const roll = Math.random() * 100;
-      let acc = 0;
-      for (const p of premios) {
-        acc += Number(p.probabilidad || 0);
-        if (roll <= acc) {
-          premioGanado = p;
-          break;
-        }
+    let roll = Math.random() * 100;
+    let acc = 0;
+
+    for (const p of premios) {
+      acc += Number(p.probabilidad || 0);
+      if (roll <= acc) {
+        premioGanado = p;
+        break;
       }
     }
 
     /* ================================
-       🔥 TRANSACTION FINAL
+       🔥 TRANSACTION
     ================================ */
     await db.runTransaction(async (t) => {
       t.update(pagoRef, { usado: true, usadoAt: new Date() });
@@ -115,6 +96,7 @@ router.post("/abrir", async (req, res) => {
 
       t.set(db.collection("aperturas").doc(), {
         cajaId,
+        pagoId,
         win: !!premioGanado,
         premio: premioGanado || null,
         createdAt: new Date(),
@@ -124,9 +106,7 @@ router.post("/abrir", async (req, res) => {
     /* ================================
        📤 RESPUESTA
     ================================ */
-    if (!premioGanado) {
-      return res.json({ win: false });
-    }
+    if (!premioGanado) return res.json({ win: false });
 
     res.json({
       win: true,
@@ -136,9 +116,9 @@ router.post("/abrir", async (req, res) => {
         imagen: premioGanado.imagen || null,
       },
     });
-  } catch (error) {
-    console.error("❌ Error abriendo caja:", error);
-    res.status(500).json({ error: "Error al abrir caja" });
+  } catch (err) {
+    console.error("❌ Error abrir caja:", err);
+    res.status(500).json({ error: "Error interno" });
   }
 });
 
