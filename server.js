@@ -7,17 +7,20 @@ import dotenv from "dotenv";
    📦 IMPORT ROUTES
 ================================ */
 import sorteosRoutes from "./routes/sorteos.js";
-import cajasRoutes from "./routes/cajas.js"; // 👈 CAJAS (PÚBLICO)
-import cajasPagoRoutes from "./routes/cajasPago.js"; // 👈 PAGO CAJAS
-import packsRoutes from "./routes/packs.js"; // 👈 PACKS (PÚBLICO)
+import cajasRoutes from "./routes/cajas.js";
+import cajasPagoRoutes from "./routes/cajasPago.js";
+import packsRoutes from "./routes/packs.js";
 
 import adminRoutes from "./routes/admin.js";
 import adminCajasRoutes from "./routes/adminCajas.js";
 import adminPacksRoutes from "./routes/adminPacks.js";
+import adminVentasRoutes from "./routes/adminVentas.js"; // 👈 NUEVA RUTA
 
 import bannersRoutes from "./routes/banners.js";
 
-// ❌ DESACTIVADO – COMPRAS / MP
+/* ================================
+   ❌ DESACTIVADO – COMPRAS / MP
+================================ */
 // import comprasRoutes from "./routes/compras.js";
 // import chancesRoutes from "./routes/chances.js";
 // import webhookRoutes from "./routes/webhook-pago.js";
@@ -28,7 +31,7 @@ dotenv.config();
 const app = express();
 
 /* ================================
-   🔵 CORS (FIX PRODUCCIÓN)
+   🔵 CORS
 ================================ */
 const allowedOrigins = [
   "https://sorteoslxm.com",
@@ -59,15 +62,6 @@ app.use(
 );
 
 /* ================================
-   ⚠️ WEBHOOK MP (DESACTIVADO)
-================================ */
-// app.use(
-//   "/webhook-pago",
-//   express.raw({ type: "*/*" }),
-//   webhookRoutes
-// );
-
-/* ================================
    JSON
 ================================ */
 app.use(express.json());
@@ -90,8 +84,8 @@ app.get("/", (_, res) => {
    🌍 RUTAS PÚBLICAS
 ================================ */
 app.use("/sorteos", sorteosRoutes);
-app.use("/cajas", cajasRoutes);      // 👈 cajas (listar / abrir)
-app.use("/cajas", cajasPagoRoutes);  // 👈 pago de cajas
+app.use("/cajas", cajasRoutes);
+app.use("/cajas", cajasPagoRoutes);
 app.use("/packs", packsRoutes);
 
 /* ================================
@@ -100,13 +94,9 @@ app.use("/packs", packsRoutes);
 app.use("/admin", adminRoutes);
 app.use("/admin/cajas", adminCajasRoutes);
 app.use("/admin/packs", adminPacksRoutes);
+app.use("/admin/ventas", adminVentasRoutes); // 👈 CONFIRMAR PAGO
 
 app.use("/banners", bannersRoutes);
-
-// ❌ DESACTIVADO – COMPRAS / MP
-// app.use("/compras", comprasRoutes);
-// app.use("/chances", chancesRoutes);
-// app.use("/mercadopago", mercadopagoRoutes);
 
 /* ================================
    🚀 SERVER
