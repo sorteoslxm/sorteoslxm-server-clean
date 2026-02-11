@@ -37,7 +37,7 @@ router.get("/validate", (req, res) => {
 });
 
 /* ============================
-   📊 DASHBOARD VENTAS (CON OBJETIVO MONETARIO)
+   📊 DASHBOARD VENTAS PRO
 ============================ */
 router.get("/dashboard/ventas", async (req, res) => {
   try {
@@ -45,54 +45,83 @@ router.get("/dashboard/ventas", async (req, res) => {
     if (token !== process.env.ADMIN_TOKEN)
       return res.status(401).json({ error: "No autorizado" });
 
+    /* 🔹 1. Traer sorteos */
     const sorteosSnap = await db.collection("sorteos").get();
     const sorteosMap = {};
 
-    sorteosSnap.forEach((d) => {
-      sorteosMap[d.id] = d.data();
+    sorteosSnap.forEach((doc) => {
+      sorteosMap[doc.id] = {
+        id: doc.id,
+        ...doc.data(),
+      };
     });
 
-    const chancesSnap = await db.collection("chances").get();
-
+    /* 🔹 2. Inicializar estructura */
+    const ventasPorSorteo = {};
     let totalRecaudado = 0;
     let totalChancesVendidas = 0;
-    const ventasPorSorteo = {};
+
+    Object.values(sorteosMap).forEach((s) => {
+      ventasPorSorteo[s.id] = {
+        sorteoId: s.id,
+        titulo: s.titulo || "Sorteo",
+        chancesVendidas: 0,
+        totalRecaudado: 0,
+        objetivoMonetario: Number(s.objetivoMonetario) || 0,
+      };
+    });
+
+    /* 🔹 3. Procesar colección CHANCES */
+    const chancesSnap = await db.collection("chances").get();
 
     chancesSnap.forEach((doc) => {
       const c = doc.data();
-      const estado = c.mpStatus || "approved";
-      if (estado !== "approved") return;
 
-      const sorteo = sorteosMap[c.sorteoId] || {};
-      const precio = Number(c.precio) || Number(sorteo.precio) || 0;
+      if (c.mpStatus !== "approved") return;
+
+      const precio = Number(c.precio) || 0;
+      const sorteoId = c.sorteoId;
+
+      if (!ventasPorSorteo[sorteoId]) return;
+
+      ventasPorSorteo[sorteoId].chancesVendidas += 1;
+      ventasPorSorteo[sorteoId].totalRecaudado += precio;
 
       totalRecaudado += precio;
       totalChancesVendidas += 1;
-
-      if (!ventasPorSorteo[c.sorteoId]) {
-        ventasPorSorteo[c.sorteoId] = {
-          sorteoId: c.sorteoId,
-          titulo: sorteo.titulo || "Sorteo",
-          chancesVendidas: 0,
-          totalRecaudado: 0,
-          objetivoMonetario: Number(sorteo.objetivoMonetario) || 0,
-        };
-      }
-
-      ventasPorSorteo[c.sorteoId].chancesVendidas += 1;
-      ventasPorSorteo[c.sorteoId].totalRecaudado += precio;
     });
 
-    // 🔥 Agregamos porcentaje de objetivo
+    /* 🔹 4. Fallback: si tenías datos viejos en COMPRAS */
+    const comprasSnap = await db.collection("compras").get();
+
+    comprasSnap.forEach((doc) => {
+      const compra = doc.data();
+
+      if (compra.mpStatus !== "approved") return;
+
+      const precio = Number(compra.total) || 0;
+      const cantidad = Number(compra.cantidad) || 1;
+      const sorteoId = compra.sorteoId;
+
+      if (!ventasPorSorteo[sorteoId]) return;
+
+      ventasPorSorteo[sorteoId].chancesVendidas += cantidad;
+      ventasPorSorteo[sorteoId].totalRecaudado += precio;
+
+      totalRecaudado += precio;
+      totalChancesVendidas += cantidad;
+    });
+
+    /* 🔹 5. Calcular porcentaje objetivo */
     const ventasFinal = Object.values(ventasPorSorteo).map((s) => {
       const porcentajeObjetivo =
         s.objetivoMonetario > 0
-          ? ((s.totalRecaudado / s.objetivoMonetario) * 100).toFixed(1)
+          ? (s.totalRecaudado / s.objetivoMonetario) * 100
           : 0;
 
       return {
         ...s,
-        porcentajeObjetivo: Number(porcentajeObjetivo),
+        porcentajeObjetivo: Number(porcentajeObjetivo.toFixed(1)),
       };
     });
 
@@ -100,7 +129,9 @@ router.get("/dashboard/ventas", async (req, res) => {
       totales: {
         totalRecaudado,
         totalChancesVendidas,
-        sorteosConVentas: ventasFinal.length,
+        sorteosConVentas: ventasFinal.filter(
+          (s) => s.chancesVendidas > 0
+        ).length,
       },
       ventasPorSorteo: ventasFinal,
     });
@@ -111,7 +142,7 @@ router.get("/dashboard/ventas", async (req, res) => {
 });
 
 /* ==========================================
-   🔁 REPROCESAR PAYMENT (SEGURO MULTI-CUENTA)
+   🔁 REPROCESAR PAYMENT
 ========================================== */
 router.post("/reprocess-payment/:paymentId", async (req, res) => {
   const { paymentId } = req.params;
@@ -153,7 +184,7 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
       });
     }
 
-    await db.collection("compras").doc(snap.docs[0].id).update({
+    await snap.docs[0].ref.update({
       mpStatus: "approved",
       recovered: true,
       reprocessedAt: new Date().toISOString(),
@@ -178,7 +209,7 @@ router.post("/reprocess-payment/:paymentId", async (req, res) => {
 });
 
 /* ==========================================
-   🔁 REPROCESAR MERCHANT ORDER (MANUAL)
+   🔁 REPROCESAR MERCHANT ORDER
 ========================================== */
 router.post(
   "/reprocess-merchant-order/:merchantOrderId",
@@ -224,10 +255,7 @@ router.post(
         resultados,
       });
     } catch (err) {
-      console.error(
-        "❌ Error reprocesando merchant order:",
-        err.message
-      );
+      console.error("❌ Error reprocesando merchant order:", err.message);
       res.status(500).json({
         ok: false,
         error: "Error reprocesando merchant order",
