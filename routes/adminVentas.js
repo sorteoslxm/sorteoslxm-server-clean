@@ -7,11 +7,22 @@ function isPending(compra) {
   return compra?.estado === "pendiente" || compra?.status === "pendiente";
 }
 
+function isCanceled(compra) {
+  return (
+    compra?.estado === "anulada" ||
+    compra?.status === "cancelled" ||
+    compra?.mpStatus === "cancelled"
+  );
+}
+
 function isApproved(compra) {
   return (
-    compra?.estado === "confirmado" ||
-    compra?.status === "approved" ||
-    compra?.mpStatus === "approved"
+    !isCanceled(compra) &&
+    (
+      compra?.estado === "confirmado" ||
+      compra?.status === "approved" ||
+      compra?.mpStatus === "approved"
+    )
   );
 }
 
@@ -64,6 +75,36 @@ async function confirmarCompra(compraId) {
     notFound: false,
     yaAprobada,
     chancesCreadas,
+  };
+}
+
+async function anularCompra(compraId) {
+  const compraRef = db.collection("compras").doc(compraId);
+  const compraSnap = await compraRef.get();
+
+  if (!compraSnap.exists) {
+    return { notFound: true };
+  }
+
+  const chancesSnap = await db
+    .collection("chances")
+    .where("compraId", "==", compraId)
+    .get();
+
+  for (const doc of chancesSnap.docs) {
+    await doc.ref.delete();
+  }
+
+  await compraRef.update({
+    estado: "anulada",
+    status: "cancelled",
+    mpStatus: "cancelled",
+    anuladoAt: new Date().toISOString(),
+  });
+
+  return {
+    notFound: false,
+    chancesEliminadas: chancesSnap.size,
   };
 }
 
@@ -174,8 +215,12 @@ router.get("/", async (req, res) => {
 
     if (estado === "pendiente") {
       ventas = ventas.filter(isPending);
+    } else if (estado === "anulada" || estado === "cancelled") {
+      ventas = ventas.filter(isCanceled);
     } else if (estado === "confirmado" || estado === "approved") {
       ventas = ventas.filter(isApproved);
+    } else {
+      ventas = ventas.filter((venta) => !isCanceled(venta));
     }
 
     res.json(ventas);
@@ -209,6 +254,85 @@ router.get("/total-confirmado", async (req, res) => {
   } catch (error) {
     console.error("❌ Error calculando total:", error);
     res.status(500).json({ error: "Error calculando total" });
+  }
+});
+
+/* =====================================================
+   🔵 CARGA MANUAL DE VENTAS VIEJAS
+   POST /admin/ventas/manual
+===================================================== */
+router.post("/manual", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const { sorteoId, telefono, cantidad, precio } = req.body;
+    const cantidadNormalizada = Math.max(Number(cantidad) || 0, 0);
+    const precioNormalizado = Math.max(Number(precio) || 0, 0);
+
+    if (!sorteoId || cantidadNormalizada <= 0) {
+      return res.status(400).json({ error: "Datos incompletos" });
+    }
+
+    const compraRef = await db.collection("compras").add({
+      sorteoId,
+      telefono: telefono || "",
+      cantidad: cantidadNormalizada,
+      precio: precioNormalizado,
+      metodo: "manual",
+      origen: "legacy",
+      estado: "confirmado",
+      status: "approved",
+      mpStatus: "approved",
+      createdAt: new Date().toISOString(),
+      fechaConfirmado: new Date().toISOString(),
+    });
+
+    const chancesCreadas = await crearChancesSiFaltan(compraRef.id, {
+      sorteoId,
+      telefono: telefono || "",
+      cantidad: cantidadNormalizada,
+      precio: precioNormalizado,
+      metodo: "manual",
+    });
+
+    res.json({
+      ok: true,
+      compraId: compraRef.id,
+      chancesCreadas,
+    });
+  } catch (error) {
+    console.error("❌ Error cargando venta manual:", error);
+    res.status(500).json({ error: "Error cargando venta manual" });
+  }
+});
+
+/* =====================================================
+   🔵 ANULAR VENTA APROBADA
+   PUT /admin/ventas/:id/anular
+===================================================== */
+router.put("/:id/anular", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const resultado = await anularCompra(req.params.id);
+
+    if (resultado.notFound) {
+      return res.status(404).json({ error: "Compra no encontrada" });
+    }
+
+    res.json({
+      ok: true,
+      chancesEliminadas: resultado.chancesEliminadas,
+    });
+  } catch (error) {
+    console.error("❌ Error anulando compra:", error);
+    res.status(500).json({ error: "Error anulando compra" });
   }
 });
 
