@@ -11,21 +11,18 @@ import cajasRoutes from "./routes/cajas.js";
 import cajasPagoRoutes from "./routes/cajasPago.js";
 import packsRoutes from "./routes/packs.js";
 
-import comprasRoutes from "./routes/compras.js";
-import chancesRoutes from "./routes/chances.js";
-
 import adminRoutes from "./routes/admin.js";
 import adminCajasRoutes from "./routes/adminCajas.js";
 import adminPacksRoutes from "./routes/adminPacks.js";
-import adminVentasRoutes from "./routes/adminVentas.js";
+import adminVentasRoutes from "./routes/adminVentas.js"; // 👈 NUEVA RUTA
 
 import bannersRoutes from "./routes/banners.js";
 
 /* ================================
-   ❌ DESACTIVADO – MP / WEBHOOK
-   Se deja apagado porque el flujo
-   de chances es manual por transferencia.
+   ❌ DESACTIVADO – COMPRAS / MP
 ================================ */
+// import comprasRoutes from "./routes/compras.js";
+// import chancesRoutes from "./routes/chances.js";
 // import webhookRoutes from "./routes/webhook-pago.js";
 // import mercadopagoRoutes from "./routes/mercadopago.js";
 
@@ -91,17 +88,13 @@ app.use("/cajas", cajasRoutes);
 app.use("/cajas", cajasPagoRoutes);
 app.use("/packs", packsRoutes);
 
-/* flujo manual de transferencias */
-app.use("/compras", comprasRoutes);
-app.use("/chances", chancesRoutes);
-
 /* ================================
    🔐 RUTAS ADMIN
 ================================ */
 app.use("/admin", adminRoutes);
 app.use("/admin/cajas", adminCajasRoutes);
 app.use("/admin/packs", adminPacksRoutes);
-app.use("/admin/ventas", adminVentasRoutes);
+app.use("/admin/ventas", adminVentasRoutes); // 👈 CONFIRMAR PAGO
 
 app.use("/banners", bannersRoutes);
 
