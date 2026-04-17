@@ -3,50 +3,49 @@ import express from "express";
 import { db } from "../config/firebase.js";
 
 const router = express.Router();
+let sorteosCache = null;
+let sorteosCacheAt = 0;
+const SORTEOS_CACHE_MS = 15000;
+
+function normalizeSorteo(doc) {
+  const sorteo = { id: doc.id, ...doc.data() };
+  const chancesTotales = Number(sorteo.numerosTotales || 0);
+  const chancesVendidas = Number(sorteo.chancesVendidas || 0);
+  const chancesDisponibles = Math.max(chancesTotales - chancesVendidas, 0);
+
+  return {
+    ...sorteo,
+    ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
+    aliasPago: sorteo.aliasPago || "",
+    chancesVendidas,
+    chancesDisponibles,
+    cerrado: chancesDisponibles <= 0,
+  };
+}
+
+export function invalidateSorteosCache() {
+  sorteosCache = null;
+  sorteosCacheAt = 0;
+}
 
 /* 🟦 Obtener todos los sorteos */
-router.get("/", async (req, res) => {
+router.get("/", async (_, res) => {
   try {
-    const [sorteosSnap, chancesSnap] = await Promise.all([
-      db.collection("sorteos").orderBy("createdAt", "desc").get(),
-      db.collection("chances").get(),
-    ]);
+    if (sorteosCache && Date.now() - sorteosCacheAt < SORTEOS_CACHE_MS) {
+      return res.json(sorteosCache);
+    }
 
-    const chancesPorSorteo = {};
-
-    chancesSnap.forEach((doc) => {
-      const chance = doc.data();
-      const sorteoId = chance.sorteoId;
-
-      if (!sorteoId) return;
-
-      if (!chancesPorSorteo[sorteoId]) {
-        chancesPorSorteo[sorteoId] = 0;
-      }
-
-      chancesPorSorteo[sorteoId] += 1;
-    });
+    const sorteosSnap = await db
+      .collection("sorteos")
+      .orderBy("createdAt", "desc")
+      .get();
 
     const lista = sorteosSnap.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }))
-      .filter((s) => s.eliminado !== true)
-      .map((sorteo) => {
-        const chancesVendidas = chancesPorSorteo[sorteo.id] || 0;
-        const chancesTotales = Number(sorteo.numerosTotales || 0);
-        const chancesDisponibles = Math.max(
-          chancesTotales - chancesVendidas,
-          0
-        );
+      .filter((doc) => doc.data()?.eliminado !== true)
+      .map(normalizeSorteo);
 
-        return {
-          ...sorteo,
-          ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
-          aliasPago: sorteo.aliasPago || "",
-          chancesVendidas,
-          chancesDisponibles,
-          cerrado: chancesDisponibles <= 0,
-        };
-      });
+    sorteosCache = lista;
+    sorteosCacheAt = Date.now();
 
     res.json(lista);
   } catch (e) {
@@ -58,35 +57,13 @@ router.get("/", async (req, res) => {
 /* 🟨 Obtener sorteo por ID */
 router.get("/:id", async (req, res) => {
   try {
-    const ref = db.collection("sorteos").doc(req.params.id);
-    const doc = await ref.get();
+    const doc = await db.collection("sorteos").doc(req.params.id).get();
 
     if (!doc.exists || doc.data()?.eliminado === true) {
       return res.status(404).json({ error: "Sorteo no encontrado" });
     }
 
-    const sorteo = { id: doc.id, ...doc.data() };
-
-    const chancesSnap = await db
-      .collection("chances")
-      .where("sorteoId", "==", sorteo.id)
-      .get();
-
-    const chancesVendidas = chancesSnap.size;
-    const chancesTotales = Number(sorteo.numerosTotales || 0);
-    const chancesDisponibles = Math.max(
-      chancesTotales - chancesVendidas,
-      0
-    );
-
-    res.json({
-      ...sorteo,
-      ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
-      aliasPago: sorteo.aliasPago || "",
-      chancesVendidas,
-      chancesDisponibles,
-      cerrado: chancesDisponibles <= 0,
-    });
+    res.json(normalizeSorteo(doc));
   } catch (e) {
     console.error("GET /sorteos/:id ERROR:", e);
     res.status(500).json({ error: "Error obteniendo sorteo" });
@@ -111,6 +88,7 @@ router.put("/:id", async (req, res) => {
     data.editedAt = new Date().toISOString();
 
     await db.collection("sorteos").doc(req.params.id).update(data);
+    invalidateSorteosCache();
 
     res.json({ ok: true });
   } catch (e) {

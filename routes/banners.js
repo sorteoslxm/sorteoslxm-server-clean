@@ -20,6 +20,18 @@ cloudinary.config({
 ================================= */
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+let principalCache = null;
+let principalCacheAt = 0;
+let inferioresCache = null;
+let inferioresCacheAt = 0;
+const BANNERS_CACHE_MS = 15000;
+
+function invalidateBannersCache() {
+  principalCache = null;
+  principalCacheAt = 0;
+  inferioresCache = null;
+  inferioresCacheAt = 0;
+}
 
 /* ================================
    🟦 Normalizar banner
@@ -40,8 +52,12 @@ function normalizeBanner(doc) {
 /* ================================
    🟦 GET - Banners inferiores
 ================================= */
-router.get("/inferiores", async (req, res) => {
+router.get("/inferiores", async (_, res) => {
   try {
+    if (inferioresCache && Date.now() - inferioresCacheAt < BANNERS_CACHE_MS) {
+      return res.json(inferioresCache);
+    }
+
     const snap = await db
       .collection("banners")
       .where("destacado", "==", false)
@@ -51,6 +67,9 @@ router.get("/inferiores", async (req, res) => {
 
     // 👉 ordenar por orden (no por fecha)
     banners.sort((a, b) => a.orden - b.orden);
+
+    inferioresCache = banners;
+    inferioresCacheAt = Date.now();
 
     res.json(banners);
   } catch (err) {
@@ -62,17 +81,23 @@ router.get("/inferiores", async (req, res) => {
 /* ================================
    🟦 GET - Banner principal
 ================================= */
-router.get("/principal", async (req, res) => {
+router.get("/principal", async (_, res) => {
   try {
+    if (principalCacheAt && Date.now() - principalCacheAt < BANNERS_CACHE_MS) {
+      return res.json(principalCache);
+    }
+
     const snap = await db
       .collection("banners")
       .where("destacado", "==", true)
       .limit(1)
       .get();
 
-    if (snap.empty) return res.json(null);
+    const banner = snap.empty ? null : normalizeBanner(snap.docs[0]);
+    principalCache = banner;
+    principalCacheAt = Date.now();
 
-    res.json(normalizeBanner(snap.docs[0]));
+    res.json(banner);
   } catch (err) {
     console.error("GET /banners/principal ERROR:", err);
     res.status(500).json({ error: "Error obteniendo banner principal" });
@@ -119,6 +144,7 @@ router.post("/upload", upload.single("banner"), async (req, res) => {
       orden: now // 👈 por defecto al final
     });
 
+    invalidateBannersCache();
     res.json({ success: true, id: doc.id, url: cloud.secure_url });
   } catch (err) {
     console.error("UPLOAD ERROR:", err);
@@ -143,6 +169,7 @@ router.patch("/:id/destacar", async (req, res) => {
     });
 
     await batch.commit();
+    invalidateBannersCache();
     res.json({ success: true });
   } catch (err) {
     console.error("DESTACAR ERROR:", err);
@@ -159,6 +186,7 @@ router.patch("/:id/link", async (req, res) => {
     await db.collection("banners").doc(req.params.id).update({
       link: link || ""
     });
+    invalidateBannersCache();
     res.json({ success: true });
   } catch (err) {
     console.error("LINK ERROR:", err);
@@ -181,6 +209,7 @@ router.patch("/:id/orden", async (req, res) => {
       orden: Number(orden)
     });
 
+    invalidateBannersCache();
     res.json({ success: true });
   } catch (err) {
     console.error("ORDEN ERROR:", err);
@@ -194,6 +223,7 @@ router.patch("/:id/orden", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     await db.collection("banners").doc(req.params.id).delete();
+    invalidateBannersCache();
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE ERROR:", err);

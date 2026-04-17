@@ -1,5 +1,6 @@
 import express from "express";
 import { db } from "../config/firebase.js";
+import { invalidateSorteosCache } from "./sorteos.js";
 
 const router = express.Router();
 
@@ -24,6 +25,33 @@ function isApproved(compra) {
       compra?.mpStatus === "approved"
     )
   );
+}
+
+async function actualizarResumenSorteo(sorteoId, deltaCantidad, deltaMonto) {
+  if (!sorteoId) return;
+
+  const ref = db.collection("sorteos").doc(sorteoId);
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+
+    const data = snap.data() || {};
+    const chancesVendidas = Math.max(
+      Number(data.chancesVendidas || 0) + Number(deltaCantidad || 0),
+      0
+    );
+    const totalRecaudado = Math.max(
+      Number(data.totalRecaudado || 0) + Number(deltaMonto || 0),
+      0
+    );
+
+    tx.update(ref, {
+      chancesVendidas,
+      totalRecaudado,
+      editedAt: new Date().toISOString(),
+    });
+  });
 }
 
 async function crearChancesSiFaltan(compraId, compra) {
@@ -71,6 +99,15 @@ async function confirmarCompra(compraId) {
 
   const chancesCreadas = await crearChancesSiFaltan(compraId, compra);
 
+  if (!yaAprobada) {
+    await actualizarResumenSorteo(
+      compra.sorteoId,
+      Number(compra.cantidad) || 1,
+      Number(compra.precio || 0)
+    );
+  }
+  invalidateSorteosCache();
+
   return {
     notFound: false,
     yaAprobada,
@@ -85,6 +122,8 @@ async function anularCompra(compraId) {
   if (!compraSnap.exists) {
     return { notFound: true };
   }
+
+  const compra = compraSnap.data();
 
   const chancesSnap = await db
     .collection("chances")
@@ -101,6 +140,13 @@ async function anularCompra(compraId) {
     mpStatus: "cancelled",
     anuladoAt: new Date().toISOString(),
   });
+
+  await actualizarResumenSorteo(
+    compra.sorteoId,
+    -(Number(compra.cantidad) || chancesSnap.size || 1),
+    -(Number(compra.precio || 0))
+  );
+  invalidateSorteosCache();
 
   return {
     notFound: false,
@@ -297,6 +343,13 @@ router.post("/manual", async (req, res) => {
       precio: precioNormalizado,
       metodo: "manual",
     });
+
+    await actualizarResumenSorteo(
+      sorteoId,
+      cantidadNormalizada,
+      precioNormalizado
+    );
+    invalidateSorteosCache();
 
     res.json({
       ok: true,

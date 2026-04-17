@@ -45,110 +45,45 @@ router.get("/dashboard/ventas", async (req, res) => {
     if (token !== process.env.ADMIN_TOKEN)
       return res.status(401).json({ error: "No autorizado" });
 
-    /* 🔹 1. Traer sorteos */
     const sorteosSnap = await db.collection("sorteos").get();
-    const sorteosMap = {};
-
-    sorteosSnap.forEach((doc) => {
-      sorteosMap[doc.id] = {
-        id: doc.id,
-        ...doc.data(),
-      };
-    });
-
-    /* 🔹 2. Inicializar estructura */
-    const ventasPorSorteo = {};
+    const ventasPorSorteo = [];
     let totalRecaudado = 0;
     let totalChancesVendidas = 0;
 
-    Object.values(sorteosMap).forEach((s) => {
-      ventasPorSorteo[s.id] = {
-        sorteoId: s.id,
+    sorteosSnap.forEach((doc) => {
+      const s = doc.data();
+      if (s?.eliminado === true) return;
+
+      const item = {
+        sorteoId: doc.id,
         titulo: s.titulo || "Sorteo",
-        chancesVendidas: 0,
-        totalRecaudado: 0,
-        objetivoMonetario: Number(s.objetivoMonetario) || 0,
+        chancesVendidas: Number(s.chancesVendidas || 0),
+        totalRecaudado: Number(s.totalRecaudado || 0),
+        objetivoMonetario: Number(s.objetivoMonetario || 0),
       };
-    });
 
-    /* 🔹 3. Procesar colección CHANCES */
-    const chancesSnap = await db.collection("chances").get();
-
-    chancesSnap.forEach((doc) => {
-      const c = doc.data();
-
-      if (c.mpStatus !== "approved") return;
-
-      const precio = Number(c.precio) || 0;
-      const sorteoId = c.sorteoId;
-
-      if (!ventasPorSorteo[sorteoId]) return;
-
-      ventasPorSorteo[sorteoId].chancesVendidas += 1;
-      ventasPorSorteo[sorteoId].totalRecaudado += precio;
-
-      totalRecaudado += precio;
-      totalChancesVendidas += 1;
-    });
-
-    /* 🔹 4. Fallback: si tenías datos viejos en COMPRAS */
-    const [comprasSnap, chancesPorCompraSnap] = await Promise.all([
-      db.collection("compras").get(),
-      db.collection("chances").get(),
-    ]);
-
-    const comprasConChance = new Set();
-    chancesPorCompraSnap.forEach((doc) => {
-      const compraId = doc.data()?.compraId;
-      if (compraId) comprasConChance.add(compraId);
-    });
-
-    comprasSnap.forEach((doc) => {
-      const compra = doc.data();
-
-      const aprobada =
-        compra.mpStatus === "approved" ||
-        compra.estado === "confirmado" ||
-        compra.status === "approved";
-
-      if (!aprobada) return;
-      if (comprasConChance.has(doc.id)) return;
-
-      const precio = Number(compra.total || compra.precio) || 0;
-      const cantidad = Number(compra.cantidad) || 1;
-      const sorteoId = compra.sorteoId;
-
-      if (!ventasPorSorteo[sorteoId]) return;
-
-      ventasPorSorteo[sorteoId].chancesVendidas += cantidad;
-      ventasPorSorteo[sorteoId].totalRecaudado += precio;
-
-      totalRecaudado += precio;
-      totalChancesVendidas += cantidad;
-    });
-
-    /* 🔹 5. Calcular porcentaje objetivo */
-    const ventasFinal = Object.values(ventasPorSorteo).map((s) => {
-      const porcentajeObjetivo =
-        s.objetivoMonetario > 0
-          ? (s.totalRecaudado / s.objetivoMonetario) * 100
-          : 0;
-
-      return {
-        ...s,
-        porcentajeObjetivo: Number(porcentajeObjetivo.toFixed(1)),
-      };
+      totalRecaudado += item.totalRecaudado;
+      totalChancesVendidas += item.chancesVendidas;
+      ventasPorSorteo.push({
+        ...item,
+        porcentajeObjetivo:
+          item.objetivoMonetario > 0
+            ? Number(
+                ((item.totalRecaudado / item.objetivoMonetario) * 100).toFixed(1)
+              )
+            : 0,
+      });
     });
 
     res.json({
       totales: {
         totalRecaudado,
         totalChancesVendidas,
-        sorteosConVentas: ventasFinal.filter(
+        sorteosConVentas: ventasPorSorteo.filter(
           (s) => s.chancesVendidas > 0
         ).length,
       },
-      ventasPorSorteo: ventasFinal,
+      ventasPorSorteo,
     });
   } catch (err) {
     console.error("❌ Dashboard ventas error:", err);
