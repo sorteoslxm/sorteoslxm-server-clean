@@ -50,9 +50,12 @@ router.get("/dashboard/ventas", async (req, res) => {
     const sorteosMap = {};
 
     sorteosSnap.forEach((doc) => {
+      const data = doc.data();
+      if (data?.eliminado === true) return;
+
       sorteosMap[doc.id] = {
         id: doc.id,
-        ...doc.data(),
+        ...data,
       };
     });
 
