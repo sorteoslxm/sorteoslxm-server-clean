@@ -12,11 +12,13 @@ router.get("/", async (req, res) => {
       .orderBy("createdAt", "desc")
       .get();
 
-    const lista = await Promise.all(
-      snap.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter((s) => s.eliminado !== true)
-        .map(async (sorteo) => {
+    const docs = snap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter((s) => s.eliminado !== true);
+
+    const resultados = await Promise.all(
+      docs.map(async (sorteo) => {
+        try {
           const chancesSnap = await db
             .collection("chances")
             .where("sorteoId", "==", sorteo.id)
@@ -37,10 +39,14 @@ router.get("/", async (req, res) => {
             chancesDisponibles,
             cerrado: chancesDisponibles <= 0,
           };
-        })
+        } catch (err) {
+          console.error(`GET /sorteos ERROR en sorteo ${sorteo.id}:`, err);
+          return null;
+        }
+      })
     );
 
-    res.json(lista);
+    res.json(resultados.filter(Boolean));
   } catch (e) {
     console.error("GET /sorteos ERROR:", e);
     res.status(500).json({ error: "Error obteniendo sorteos" });
@@ -90,7 +96,6 @@ router.put("/:id", async (req, res) => {
   try {
     const data = { ...req.body };
 
-    // ✅ Normalizamos ofertas SIN perder campos
     if (Array.isArray(data.ofertas)) {
       data.ofertas = data.ofertas.map((o) => ({
         nombre: o.nombre || "",
