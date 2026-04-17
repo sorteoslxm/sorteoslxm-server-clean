@@ -3,59 +3,225 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
+function isPending(compra) {
+  return compra?.estado === "pendiente" || compra?.status === "pendiente";
+}
+
+function isCanceled(compra) {
+  return (
+    compra?.estado === "anulada" ||
+    compra?.status === "cancelled" ||
+    compra?.mpStatus === "cancelled"
+  );
+}
+
+function isApproved(compra) {
+  return (
+    !isCanceled(compra) &&
+    (
+      compra?.estado === "confirmado" ||
+      compra?.status === "approved" ||
+      compra?.mpStatus === "approved"
+    )
+  );
+}
+
+async function crearChancesSiFaltan(compraId, compra) {
+  const cantidad = Math.max(Number(compra.cantidad) || 1, 1);
+  const chancesSnap = await db
+    .collection("chances")
+    .where("compraId", "==", compraId)
+    .get();
+
+  const faltantes = cantidad - chancesSnap.size;
+  if (faltantes <= 0) return 0;
+
+  for (let i = 0; i < faltantes; i += 1) {
+    await db.collection("chances").add({
+      sorteoId: compra.sorteoId,
+      compraId,
+      telefono: compra.telefono || null,
+      precio: Number(compra.precio) || 0,
+      mpStatus: "approved",
+      metodo: compra.metodo || "transferencia",
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return faltantes;
+}
+
+async function confirmarCompra(compraId) {
+  const compraRef = db.collection("compras").doc(compraId);
+  const compraSnap = await compraRef.get();
+
+  if (!compraSnap.exists) {
+    return { notFound: true };
+  }
+
+  const compra = compraSnap.data();
+  const yaAprobada = isApproved(compra);
+
+  await compraRef.update({
+    estado: "confirmado",
+    status: "approved",
+    mpStatus: "approved",
+    fechaConfirmado: new Date().toISOString(),
+  });
+
+  const chancesCreadas = await crearChancesSiFaltan(compraId, compra);
+
+  return {
+    notFound: false,
+    yaAprobada,
+    chancesCreadas,
+  };
+}
+
+async function anularCompra(compraId) {
+  const compraRef = db.collection("compras").doc(compraId);
+  const compraSnap = await compraRef.get();
+
+  if (!compraSnap.exists) {
+    return { notFound: true };
+  }
+
+  const chancesSnap = await db
+    .collection("chances")
+    .where("compraId", "==", compraId)
+    .get();
+
+  for (const doc of chancesSnap.docs) {
+    await doc.ref.delete();
+  }
+
+  await compraRef.update({
+    estado: "anulada",
+    status: "cancelled",
+    mpStatus: "cancelled",
+    anuladoAt: new Date().toISOString(),
+  });
+
+  return {
+    notFound: false,
+    chancesEliminadas: chancesSnap.size,
+  };
+}
+
 /* =====================================================
-   🔵 CONFIRMAR PAGO
-   POST /admin/ventas/confirmar/:id
+   🔵 LISTAR COMPRAS PENDIENTES
+   GET /admin/ventas/pendientes
 ===================================================== */
-router.post("/confirmar/:id", async (req, res) => {
+router.get("/pendientes", async (req, res) => {
   try {
-    const { id } = req.params;
-
-    const ventaRef = db.collection("ventas").doc(id);
-    const ventaSnap = await ventaRef.get();
-
-    if (!ventaSnap.exists) {
-      return res.status(404).json({ error: "Venta no encontrada" });
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
     }
 
-    const ventaData = ventaSnap.data();
+    const [comprasSnap, sorteosSnap] = await Promise.all([
+      db.collection("compras").orderBy("createdAt", "desc").get(),
+      db.collection("sorteos").get(),
+    ]);
 
-    if (ventaData.estado === "confirmado") {
-      return res.json({ message: "La venta ya estaba confirmada" });
-    }
-
-    await ventaRef.update({
-      estado: "confirmado",
-      fechaConfirmado: new Date(),
+    const sorteosMap = {};
+    sorteosSnap.forEach((doc) => {
+      sorteosMap[doc.id] = doc.data()?.titulo || "Sorteo";
     });
 
-    res.json({ success: true });
+    const pendientes = comprasSnap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .filter(isPending)
+      .map((compra) => ({
+        ...compra,
+        sorteoTitulo: sorteosMap[compra.sorteoId] || "Sorteo",
+      }));
+
+    res.json(pendientes);
   } catch (error) {
-    console.error("❌ Error confirmando pago:", error);
-    res.status(500).json({ error: "Error confirmando pago" });
+    console.error("❌ Error obteniendo pendientes:", error);
+    res.status(500).json({ error: "Error obteniendo pendientes" });
   }
 });
 
 /* =====================================================
-   🔵 LISTAR VENTAS (opcional filtro por estado)
-   GET /admin/ventas?estado=confirmado
+   🔵 CONFIRMAR COMPRA PENDIENTE
+   POST /admin/ventas/confirmar/:id
+   PUT  /admin/ventas/:id/confirmar
+===================================================== */
+router.post("/confirmar/:id", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const resultado = await confirmarCompra(req.params.id);
+
+    if (resultado.notFound) {
+      return res.status(404).json({ error: "Compra no encontrada" });
+    }
+
+    res.json({
+      ok: true,
+      yaAprobada: resultado.yaAprobada,
+      chancesCreadas: resultado.chancesCreadas,
+    });
+  } catch (error) {
+    console.error("❌ Error confirmando compra:", error);
+    res.status(500).json({ error: "Error confirmando compra" });
+  }
+});
+
+router.put("/:id/confirmar", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const resultado = await confirmarCompra(req.params.id);
+
+    if (resultado.notFound) {
+      return res.status(404).json({ error: "Compra no encontrada" });
+    }
+
+    res.json({
+      ok: true,
+      yaAprobada: resultado.yaAprobada,
+      chancesCreadas: resultado.chancesCreadas,
+    });
+  } catch (error) {
+    console.error("❌ Error confirmando compra:", error);
+    res.status(500).json({ error: "Error confirmando compra" });
+  }
+});
+
+/* =====================================================
+   🔵 LISTAR VENTAS
+   GET /admin/ventas
 ===================================================== */
 router.get("/", async (req, res) => {
   try {
-    const { estado } = req.query;
-
-    let query = db.collection("ventas");
-
-    if (estado) {
-      query = query.where("estado", "==", estado);
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
     }
 
-    const snapshot = await query.get();
+    const { estado } = req.query;
+    const comprasSnap = await db.collection("compras").orderBy("createdAt", "desc").get();
 
-    const ventas = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    let ventas = comprasSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+    if (estado === "pendiente") {
+      ventas = ventas.filter(isPending);
+    } else if (estado === "anulada" || estado === "cancelled") {
+      ventas = ventas.filter(isCanceled);
+    } else if (estado === "confirmado" || estado === "approved") {
+      ventas = ventas.filter(isApproved);
+    } else {
+      ventas = ventas.filter((venta) => !isCanceled(venta));
+    }
 
     res.json(ventas);
   } catch (error) {
@@ -70,22 +236,103 @@ router.get("/", async (req, res) => {
 ===================================================== */
 router.get("/total-confirmado", async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("ventas")
-      .where("estado", "==", "confirmado")
-      .get();
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const snapshot = await db.collection("compras").get();
 
     let total = 0;
-
     snapshot.docs.forEach((doc) => {
       const data = doc.data();
-      total += Number(data.monto || 0);
+      if (!isApproved(data)) return;
+      total += Number(data.precio || data.total || 0);
     });
 
     res.json({ total });
   } catch (error) {
     console.error("❌ Error calculando total:", error);
     res.status(500).json({ error: "Error calculando total" });
+  }
+});
+
+/* =====================================================
+   🔵 CARGA MANUAL DE VENTAS VIEJAS
+   POST /admin/ventas/manual
+===================================================== */
+router.post("/manual", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const { sorteoId, telefono, cantidad, precio } = req.body;
+    const cantidadNormalizada = Math.max(Number(cantidad) || 0, 0);
+    const precioNormalizado = Math.max(Number(precio) || 0, 0);
+
+    if (!sorteoId || cantidadNormalizada <= 0) {
+      return res.status(400).json({ error: "Datos incompletos" });
+    }
+
+    const compraRef = await db.collection("compras").add({
+      sorteoId,
+      telefono: telefono || "",
+      cantidad: cantidadNormalizada,
+      precio: precioNormalizado,
+      metodo: "manual",
+      origen: "legacy",
+      estado: "confirmado",
+      status: "approved",
+      mpStatus: "approved",
+      createdAt: new Date().toISOString(),
+      fechaConfirmado: new Date().toISOString(),
+    });
+
+    const chancesCreadas = await crearChancesSiFaltan(compraRef.id, {
+      sorteoId,
+      telefono: telefono || "",
+      cantidad: cantidadNormalizada,
+      precio: precioNormalizado,
+      metodo: "manual",
+    });
+
+    res.json({
+      ok: true,
+      compraId: compraRef.id,
+      chancesCreadas,
+    });
+  } catch (error) {
+    console.error("❌ Error cargando venta manual:", error);
+    res.status(500).json({ error: "Error cargando venta manual" });
+  }
+});
+
+/* =====================================================
+   🔵 ANULAR VENTA APROBADA
+   PUT /admin/ventas/:id/anular
+===================================================== */
+router.put("/:id/anular", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const resultado = await anularCompra(req.params.id);
+
+    if (resultado.notFound) {
+      return res.status(404).json({ error: "Compra no encontrada" });
+    }
+
+    res.json({
+      ok: true,
+      chancesEliminadas: resultado.chancesEliminadas,
+    });
+  } catch (error) {
+    console.error("❌ Error anulando compra:", error);
+    res.status(500).json({ error: "Error anulando compra" });
   }
 });
 
