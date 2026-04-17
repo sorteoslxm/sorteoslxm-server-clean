@@ -92,29 +92,14 @@ router.get("/dashboard/ventas", async (req, res) => {
     });
 
     /* 🔹 4. Fallback: si tenías datos viejos en COMPRAS */
-    const [comprasSnap, chancesPorCompraSnap] = await Promise.all([
-      db.collection("compras").get(),
-      db.collection("chances").get(),
-    ]);
-
-    const comprasConChance = new Set();
-    chancesPorCompraSnap.forEach((doc) => {
-      const compraId = doc.data()?.compraId;
-      if (compraId) comprasConChance.add(compraId);
-    });
+    const comprasSnap = await db.collection("compras").get();
 
     comprasSnap.forEach((doc) => {
       const compra = doc.data();
 
-      const aprobada =
-        compra.mpStatus === "approved" ||
-        compra.estado === "confirmado" ||
-        compra.status === "approved";
+      if (compra.mpStatus !== "approved") return;
 
-      if (!aprobada) return;
-      if (comprasConChance.has(doc.id)) return;
-
-      const precio = Number(compra.total || compra.precio) || 0;
+      const precio = Number(compra.total) || 0;
       const cantidad = Number(compra.cantidad) || 1;
       const sorteoId = compra.sorteoId;
 
