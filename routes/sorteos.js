@@ -7,46 +7,48 @@ const router = express.Router();
 /* 🟦 Obtener todos los sorteos */
 router.get("/", async (req, res) => {
   try {
-    const snap = await db
-      .collection("sorteos")
-      .orderBy("createdAt", "desc")
-      .get();
+    const [sorteosSnap, chancesSnap] = await Promise.all([
+      db.collection("sorteos").orderBy("createdAt", "desc").get(),
+      db.collection("chances").get(),
+    ]);
 
-    const docs = snap.docs
+    const chancesPorSorteo = {};
+
+    chancesSnap.forEach((doc) => {
+      const chance = doc.data();
+      const sorteoId = chance.sorteoId;
+
+      if (!sorteoId) return;
+
+      if (!chancesPorSorteo[sorteoId]) {
+        chancesPorSorteo[sorteoId] = 0;
+      }
+
+      chancesPorSorteo[sorteoId] += 1;
+    });
+
+    const lista = sorteosSnap.docs
       .map((doc) => ({ id: doc.id, ...doc.data() }))
-      .filter((s) => s.eliminado !== true);
+      .filter((s) => s.eliminado !== true)
+      .map((sorteo) => {
+        const chancesVendidas = chancesPorSorteo[sorteo.id] || 0;
+        const chancesTotales = Number(sorteo.numerosTotales || 0);
+        const chancesDisponibles = Math.max(
+          chancesTotales - chancesVendidas,
+          0
+        );
 
-    const resultados = await Promise.all(
-      docs.map(async (sorteo) => {
-        try {
-          const chancesSnap = await db
-            .collection("chances")
-            .where("sorteoId", "==", sorteo.id)
-            .get();
+        return {
+          ...sorteo,
+          ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
+          aliasPago: sorteo.aliasPago || "",
+          chancesVendidas,
+          chancesDisponibles,
+          cerrado: chancesDisponibles <= 0,
+        };
+      });
 
-          const chancesVendidas = chancesSnap.size;
-          const chancesTotales = Number(sorteo.numerosTotales || 0);
-          const chancesDisponibles = Math.max(
-            chancesTotales - chancesVendidas,
-            0
-          );
-
-          return {
-            ...sorteo,
-            ofertas: Array.isArray(sorteo.ofertas) ? sorteo.ofertas : [],
-            aliasPago: sorteo.aliasPago || "",
-            chancesVendidas,
-            chancesDisponibles,
-            cerrado: chancesDisponibles <= 0,
-          };
-        } catch (err) {
-          console.error(`GET /sorteos ERROR en sorteo ${sorteo.id}:`, err);
-          return null;
-        }
-      })
-    );
-
-    res.json(resultados.filter(Boolean));
+    res.json(lista);
   } catch (e) {
     console.error("GET /sorteos ERROR:", e);
     res.status(500).json({ error: "Error obteniendo sorteos" });

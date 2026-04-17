@@ -40,6 +40,7 @@ const allowedOrigins = [
   "https://sorteoslxm.com",
   "https://www.sorteoslxm.com",
   "https://sorteos-lxm.vercel.app",
+  "https://sorteoslxm-frontend.onrender.com",
   "http://localhost:3000",
   "http://localhost:5173",
 ];
@@ -54,6 +55,10 @@ app.use(
       }
 
       if (origin.endsWith(".vercel.app")) {
+        return callback(null, true);
+      }
+
+      if (origin.endsWith(".onrender.com")) {
         return callback(null, true);
       }
 
