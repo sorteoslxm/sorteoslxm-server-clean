@@ -198,6 +198,25 @@ async function actualizarMontoCompra(compraId, nuevoPrecio) {
   };
 }
 
+async function eliminarCompraPendiente(compraId) {
+  const compraRef = db.collection("compras").doc(compraId);
+  const compraSnap = await compraRef.get();
+
+  if (!compraSnap.exists) {
+    return { notFound: true, invalidState: false };
+  }
+
+  const compra = compraSnap.data();
+
+  if (!isPending(compra)) {
+    return { notFound: false, invalidState: true };
+  }
+
+  await compraRef.delete();
+
+  return { notFound: false, invalidState: false };
+}
+
 /* =====================================================
    🔵 LISTAR COMPRAS PENDIENTES
    GET /admin/ventas/pendientes
@@ -284,6 +303,34 @@ router.put("/:id/confirmar", async (req, res) => {
   } catch (error) {
     console.error("❌ Error confirmando compra:", error);
     res.status(500).json({ error: "Error confirmando compra" });
+  }
+});
+
+/* =====================================================
+   🔵 ELIMINAR COMPRA PENDIENTE
+   DELETE /admin/ventas/:id/pendiente
+===================================================== */
+router.delete("/:id/pendiente", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const resultado = await eliminarCompraPendiente(req.params.id);
+
+    if (resultado.notFound) {
+      return res.status(404).json({ error: "Compra no encontrada" });
+    }
+
+    if (resultado.invalidState) {
+      return res.status(400).json({ error: "Solo se pueden eliminar transferencias pendientes" });
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("❌ Error eliminando pendiente:", error);
+    res.status(500).json({ error: "Error eliminando transferencia pendiente" });
   }
 });
 
