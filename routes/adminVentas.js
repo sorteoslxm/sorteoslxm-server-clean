@@ -154,6 +154,21 @@ async function anularCompra(compraId) {
   };
 }
 
+async function anularComprasBulk(compraIds) {
+  let anuladas = 0;
+  let chancesEliminadas = 0;
+
+  for (const compraId of compraIds) {
+    const resultado = await anularCompra(compraId);
+    if (resultado.notFound) continue;
+
+    anuladas += 1;
+    chancesEliminadas += Number(resultado.chancesEliminadas || 0);
+  }
+
+  return { anuladas, chancesEliminadas };
+}
+
 /* =====================================================
    🔵 LISTAR COMPRAS PENDIENTES
    GET /admin/ventas/pendientes
@@ -386,6 +401,37 @@ router.put("/:id/anular", async (req, res) => {
   } catch (error) {
     console.error("❌ Error anulando compra:", error);
     res.status(500).json({ error: "Error anulando compra" });
+  }
+});
+
+/* =====================================================
+   🔵 ANULAR VARIAS VENTAS
+   DELETE /admin/ventas/bulk
+===================================================== */
+router.delete("/bulk", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : [];
+    const uniqueIds = [...new Set(ids)];
+
+    if (uniqueIds.length === 0) {
+      return res.status(400).json({ error: "No se enviaron ventas para anular" });
+    }
+
+    const resultado = await anularComprasBulk(uniqueIds);
+
+    res.json({
+      ok: true,
+      anuladas: resultado.anuladas,
+      chancesEliminadas: resultado.chancesEliminadas,
+    });
+  } catch (error) {
+    console.error("❌ Error anulando ventas en lote:", error);
+    res.status(500).json({ error: "Error anulando ventas" });
   }
 });
 
