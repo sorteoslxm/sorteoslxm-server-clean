@@ -4,6 +4,14 @@ import { db } from "../config/firebase.js";
 
 const router = express.Router();
 
+function parseMoney(value) {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return Number(value) || 0;
+
+  const normalized = value.replace(/\./g, "").replace(/,/g, ".");
+  return Number(normalized) || 0;
+}
+
 /* 🧾 Listar compras (admin) */
 router.get("/", async (req, res) => {
   try {
@@ -21,11 +29,12 @@ router.get("/", async (req, res) => {
 });
 
 /* ➕ Crear compra manual (transferencia) */
-router.post("/", async (req, res) => {
+  router.post("/", async (req, res) => {
   try {
     const { sorteoId, telefono, cantidad, precio, aliasPago } = req.body;
+    const precioNormalizado = parseMoney(precio);
 
-    if (!sorteoId || !telefono || !cantidad || !precio) {
+    if (!sorteoId || !telefono || !cantidad || !precioNormalizado) {
       return res.status(400).json({ error: "Datos incompletos" });
     }
 
@@ -33,7 +42,7 @@ router.post("/", async (req, res) => {
       sorteoId,
       telefono,
       cantidad: Number(cantidad),
-      precio: Number(precio),
+      precio: precioNormalizado,
       aliasPago,
       metodo: "transferencia",
       estado: "pendiente",
