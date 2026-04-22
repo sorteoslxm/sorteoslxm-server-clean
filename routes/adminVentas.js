@@ -404,11 +404,7 @@ router.put("/:id/anular", async (req, res) => {
   }
 });
 
-/* =====================================================
-   🔵 ANULAR VARIAS VENTAS
-   DELETE /admin/ventas/bulk
-===================================================== */
-router.delete("/bulk", async (req, res) => {
+async function anularVentasBulkHandler(req, res) {
   try {
     const token = req.headers["x-admin-token"];
     if (token !== process.env.ADMIN_TOKEN) {
@@ -433,6 +429,14 @@ router.delete("/bulk", async (req, res) => {
     console.error("❌ Error anulando ventas en lote:", error);
     res.status(500).json({ error: "Error anulando ventas" });
   }
-});
+}
+
+/* =====================================================
+   🔵 ANULAR VARIAS VENTAS
+   POST /admin/ventas/bulk/anular
+   DELETE /admin/ventas/bulk
+===================================================== */
+router.post("/bulk/anular", anularVentasBulkHandler);
+router.delete("/bulk", anularVentasBulkHandler);
 
 export default router;
