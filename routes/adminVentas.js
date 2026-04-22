@@ -169,6 +169,35 @@ async function anularComprasBulk(compraIds) {
   return { anuladas, chancesEliminadas };
 }
 
+async function actualizarMontoCompra(compraId, nuevoPrecio) {
+  const compraRef = db.collection("compras").doc(compraId);
+  const compraSnap = await compraRef.get();
+
+  if (!compraSnap.exists) {
+    return { notFound: true };
+  }
+
+  const compra = compraSnap.data();
+  const precioAnterior = Number(compra.precio || 0);
+  const precioNormalizado = Math.max(Number(nuevoPrecio) || 0, 0);
+  const deltaMonto = precioNormalizado - precioAnterior;
+
+  await compraRef.update({
+    precio: precioNormalizado,
+    editedAt: new Date().toISOString(),
+  });
+
+  if (isApproved(compra) && deltaMonto !== 0) {
+    await actualizarResumenSorteo(compra.sorteoId, 0, deltaMonto);
+    invalidateSorteosCache();
+  }
+
+  return {
+    notFound: false,
+    precio: precioNormalizado,
+  };
+}
+
 /* =====================================================
    🔵 LISTAR COMPRAS PENDIENTES
    GET /admin/ventas/pendientes
@@ -401,6 +430,36 @@ router.put("/:id/anular", async (req, res) => {
   } catch (error) {
     console.error("❌ Error anulando compra:", error);
     res.status(500).json({ error: "Error anulando compra" });
+  }
+});
+
+/* =====================================================
+   🔵 EDITAR MONTO DE VENTA
+   PUT /admin/ventas/:id/monto
+===================================================== */
+router.put("/:id/monto", async (req, res) => {
+  try {
+    const token = req.headers["x-admin-token"];
+    if (token !== process.env.ADMIN_TOKEN) {
+      return res.status(401).json({ error: "No autorizado" });
+    }
+
+    const resultado = await actualizarMontoCompra(
+      req.params.id,
+      req.body?.precio
+    );
+
+    if (resultado.notFound) {
+      return res.status(404).json({ error: "Compra no encontrada" });
+    }
+
+    res.json({
+      ok: true,
+      precio: resultado.precio,
+    });
+  } catch (error) {
+    console.error("❌ Error editando monto:", error);
+    res.status(500).json({ error: "Error editando monto" });
   }
 });
 
