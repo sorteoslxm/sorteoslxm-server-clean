@@ -45,7 +45,37 @@ router.get("/dashboard/ventas", async (req, res) => {
     if (token !== process.env.ADMIN_TOKEN)
       return res.status(401).json({ error: "No autorizado" });
 
-    const sorteosSnap = await db.collection("sorteos").get();
+    const [sorteosSnap, comprasSnap] = await Promise.all([
+      db.collection("sorteos").get(),
+      db.collection("compras").get(),
+    ]);
+
+    const resumenPorSorteo = {};
+
+    comprasSnap.forEach((doc) => {
+      const compra = doc.data() || {};
+      const aprobada =
+        compra.mpStatus === "approved" ||
+        compra.estado === "confirmado" ||
+        compra.status === "approved";
+
+      if (!aprobada || !compra.sorteoId) return;
+
+      if (!resumenPorSorteo[compra.sorteoId]) {
+        resumenPorSorteo[compra.sorteoId] = {
+          chancesVendidas: 0,
+          totalRecaudado: 0,
+        };
+      }
+
+      resumenPorSorteo[compra.sorteoId].chancesVendidas += Number(
+        compra.cantidad || 0
+      );
+      resumenPorSorteo[compra.sorteoId].totalRecaudado += Number(
+        compra.precio || compra.total || 0
+      );
+    });
+
     const ventasPorSorteo = [];
     let totalRecaudado = 0;
     let totalChancesVendidas = 0;
@@ -54,11 +84,19 @@ router.get("/dashboard/ventas", async (req, res) => {
       const s = doc.data();
       if (s?.eliminado === true) return;
 
+      const resumen = resumenPorSorteo[doc.id] || {};
+      const chancesVendidas = Number(
+        resumen.chancesVendidas ?? s.chancesVendidas ?? 0
+      );
+      const totalRecaudadoSorteo = Number(
+        resumen.totalRecaudado ?? s.totalRecaudado ?? 0
+      );
+
       const item = {
         sorteoId: doc.id,
         titulo: s.titulo || "Sorteo",
-        chancesVendidas: Number(s.chancesVendidas || 0),
-        totalRecaudado: Number(s.totalRecaudado || 0),
+        chancesVendidas,
+        totalRecaudado: totalRecaudadoSorteo,
         objetivoMonetario: Number(s.objetivoMonetario || 0),
       };
 
